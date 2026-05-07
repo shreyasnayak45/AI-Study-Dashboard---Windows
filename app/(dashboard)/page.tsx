@@ -35,11 +35,11 @@ export default async function DashboardPage() {
   const weekHours  = (trackerStats.weekMinutes  / 60).toFixed(1).replace(/\.0$/, "");
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-6 lg:p-8">
 
       {/* ── Welcome ───────────────────────────────────────────────── */}
       <div className="mb-8">
-        <h1 className="text-3xl font-bold tracking-tight text-white">
+        <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">
           {greeting}, {firstName} 👋
         </h1>
         <p className="mt-1.5 text-sm text-white/40">

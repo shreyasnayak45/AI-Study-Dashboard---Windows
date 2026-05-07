@@ -60,7 +60,7 @@ export function DeleteAccountModal({ isOpen, onClose }: Props) {
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 8 }}
             transition={{ type: "spring", damping: 30, stiffness: 400 }}
-            className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-red-500/20 bg-[#0d0d14] p-6 shadow-2xl"
+            className="fixed left-1/2 top-1/2 z-50 w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-red-500/20 bg-[#0d0d14] p-5 shadow-2xl sm:p-6"
           >
             {/* Header */}
             <div className="mb-5 flex items-start justify-between gap-3">

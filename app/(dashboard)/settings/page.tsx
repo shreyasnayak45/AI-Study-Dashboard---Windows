@@ -11,7 +11,7 @@ export default async function SettingsPage() {
   const { profile, settings } = await getProfileAndSettings();
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-6 lg:p-8">
       <SettingsClient user={user} profile={profile} settings={settings} />
     </div>
   );

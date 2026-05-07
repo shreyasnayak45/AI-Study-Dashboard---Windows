@@ -204,7 +204,7 @@ export function SettingsClient({ user, profile, settings }: Props) {
     <div className="mx-auto max-w-3xl">
       {/* ── Header ──────────────────────────────────────────────────── */}
       <div className="mb-8">
-        <h1 className="text-3xl font-bold tracking-tight text-white">Settings</h1>
+        <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">Settings</h1>
         <p className="mt-1.5 text-sm text-white/40">Manage your account, preferences, and data.</p>
       </div>
 

@@ -57,7 +57,7 @@ export function TrackerClient({ sessions }: TrackerClientProps) {
       {/* Page header */}
       <div className="mb-8 flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-white">Study Tracker</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">Study Tracker</h1>
           <p className="mt-1 text-sm text-white/40">
             {sessions.length === 0
               ? "Log your first study session below"

@@ -42,11 +42,11 @@ export default async function AnalyticsPage() {
   const monthHours   = (monthMinutes / 60).toFixed(1).replace(/\.0$/, "");
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-6 lg:p-8">
 
       {/* ── Header ───────────────────────────────────────────────────── */}
       <div className="mb-8">
-        <h1 className="text-3xl font-bold tracking-tight text-white">Analytics</h1>
+        <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">Analytics</h1>
         <p className="mt-1.5 text-sm text-white/40">
           {stats.totalSessions === 0
             ? "Log study sessions to see your stats here."
@@ -55,7 +55,7 @@ export default async function AnalyticsPage() {
       </div>
 
       {/* ── Stat cards — rendered eagerly, no heavy JS needed ────────── */}
-      <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <AnalyticStatCard
           label="Total Study Time"
           value={`${totalHours}h`}

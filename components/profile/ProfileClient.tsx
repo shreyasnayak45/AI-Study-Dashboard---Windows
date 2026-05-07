@@ -88,7 +88,7 @@ export function ProfileClient({ user, profile, profileStats }: ProfileClientProp
     <div className="mx-auto max-w-3xl">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-3xl font-bold tracking-tight text-white">Profile</h1>
+        <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">Profile</h1>
         <p className="mt-1.5 text-sm text-white/40">Your account and study overview.</p>
       </div>
 

@@ -9,7 +9,7 @@ export default async function TrackerPage() {
   const sessions = await getSessionsForTracker();
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-6 lg:p-8">
       <TrackerClient sessions={sessions} />
     </div>
   );

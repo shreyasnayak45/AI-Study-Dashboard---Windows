@@ -43,7 +43,7 @@ export function TasksClient({ tasks }: TasksClientProps) {
       {/* Header */}
       <div className="mb-6 flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-white">Task Manager</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">Task Manager</h1>
           <p className="mt-1 text-sm text-white/40">
             {tasks.length === 0
               ? "Add your first task below"
