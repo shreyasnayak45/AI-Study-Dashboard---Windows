@@ -7,18 +7,8 @@ import { Square } from "lucide-react";
 import { SubjectBadge } from "./SubjectBadge";
 import { getActiveSession, clearLiveSession, LIVE_SESSION_EVENT } from "@/lib/live-session";
 import { saveLiveSession } from "@/app/actions/tracker";
+import { formatElapsed } from "@/lib/tracker-utils";
 import type { ActiveSession } from "@/types";
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function formatElapsed(totalSeconds: number): string {
-  const h  = Math.floor(totalSeconds / 3600);
-  const m  = Math.floor((totalSeconds % 3600) / 60);
-  const s  = totalSeconds % 60;
-  const mm = String(m).padStart(2, "0");
-  const ss = String(s).padStart(2, "0");
-  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
-}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 

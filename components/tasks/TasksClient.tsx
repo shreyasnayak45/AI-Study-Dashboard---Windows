@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Plus, CheckSquare } from "lucide-react";
 import { Button } from "@/components/ui/Button";
@@ -18,20 +18,20 @@ export function TasksClient({ tasks }: TasksClientProps) {
   const [isFormOpen,   setIsFormOpen]   = useState(false);
   const [editingTask,  setEditingTask]  = useState<Task | null>(null);
 
-  function openAdd() {
+  const openAdd = useCallback(() => {
     setEditingTask(null);
     setIsFormOpen(true);
-  }
+  }, []);
 
-  function openEdit(task: Task) {
+  const openEdit = useCallback((task: Task) => {
     setEditingTask(task);
     setIsFormOpen(true);
-  }
+  }, []);
 
-  function closeForm() {
+  const closeForm = useCallback(() => {
     setIsFormOpen(false);
     setEditingTask(null);
-  }
+  }, []);
 
   // Memoize derived values — prevents repeated O(n) passes on every render
   const filtered       = useMemo(() => applyFilter(tasks, activeFilter), [tasks, activeFilter]);

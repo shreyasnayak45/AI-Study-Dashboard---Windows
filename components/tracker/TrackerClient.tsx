@@ -10,7 +10,7 @@
 // After a create/update/delete, the Server Action calls revalidatePath("/tracker"),
 // which causes Next.js to re-run the Server Component and push fresh data down.
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Plus, BookOpen } from "lucide-react";
 import { Button } from "@/components/ui/Button";
@@ -28,20 +28,20 @@ export function TrackerClient({ sessions }: TrackerClientProps) {
   const [isFormOpen,     setIsFormOpen]     = useState(false);
   const [editingSession, setEditingSession] = useState<StudySession | null>(null);
 
-  function openAdd() {
+  const openAdd = useCallback(() => {
     setEditingSession(null);
     setIsFormOpen(true);
-  }
+  }, []);
 
-  function openEdit(session: StudySession) {
+  const openEdit = useCallback((session: StudySession) => {
     setEditingSession(session);
     setIsFormOpen(true);
-  }
+  }, []);
 
-  function closeForm() {
+  const closeForm = useCallback(() => {
     setIsFormOpen(false);
     setEditingSession(null);
-  }
+  }, []);
 
   // Quick summary stats derived from the passed sessions
   const totalMinutesThisWeek = (() => {

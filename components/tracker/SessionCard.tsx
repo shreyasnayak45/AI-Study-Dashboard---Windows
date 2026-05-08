@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { memo, useState, useTransition } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Pencil, Trash2, Clock, FileText, AlertTriangle } from "lucide-react";
 import { SubjectBadge } from "./SubjectBadge";
@@ -13,7 +13,7 @@ interface SessionCardProps {
   onEdit: (session: StudySession) => void;
 }
 
-export function SessionCard({ session, onEdit }: SessionCardProps) {
+export const SessionCard = memo(function SessionCard({ session, onEdit }: SessionCardProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [deleteError, setDeleteError] = useState("");
@@ -114,4 +114,4 @@ export function SessionCard({ session, onEdit }: SessionCardProps) {
       )}
     </motion.div>
   );
-}
+});

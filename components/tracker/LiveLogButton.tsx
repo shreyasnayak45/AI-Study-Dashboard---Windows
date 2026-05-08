@@ -5,19 +5,9 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Radio } from "lucide-react";
 import { getActiveSession, LIVE_SESSION_EVENT } from "@/lib/live-session";
+import { formatElapsed } from "@/lib/tracker-utils";
 import { LiveSessionPanel } from "./LiveSessionPanel";
 import type { ActiveSession } from "@/types";
-
-// ─── Timer formatter ──────────────────────────────────────────────────────────
-
-function formatElapsed(totalSeconds: number): string {
-  const h  = Math.floor(totalSeconds / 3600);
-  const m  = Math.floor((totalSeconds % 3600) / 60);
-  const s  = totalSeconds % 60;
-  const mm = String(m).padStart(2, "0");
-  const ss = String(s).padStart(2, "0");
-  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
-}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 

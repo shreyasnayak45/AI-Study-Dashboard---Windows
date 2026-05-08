@@ -1,6 +1,19 @@
 // Pure, client-safe utility functions for the tracker.
 // NO server imports — this file is safe to import from any component.
 
+/**
+ * Format a live-session elapsed seconds value → "mm:ss" or "h:mm:ss".
+ * Used by ActiveSessionBanner and LiveLogButton.
+ */
+export function formatElapsed(totalSeconds: number): string {
+  const h  = Math.floor(totalSeconds / 3600);
+  const m  = Math.floor((totalSeconds % 3600) / 60);
+  const s  = totalSeconds % 60;
+  const mm = String(m).padStart(2, "0");
+  const ss = String(s).padStart(2, "0");
+  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
 /** Format minutes → "2h 30m", "45m", "1h" etc. */
 export function formatDuration(minutes: number): string {
   const h = Math.floor(minutes / 60);
