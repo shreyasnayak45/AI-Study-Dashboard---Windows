@@ -1,16 +1,22 @@
-// SERVER-ONLY — imports next/headers via lib/supabase/server.
-// Do NOT import this file from any "use client" component.
+// SERVER-ONLY — do NOT import from any "use client" component.
 //
 // Two-layer caching strategy:
 //   1. unstable_cache  — persists results across requests, per user, for 60 s.
-//      Tag: "analytics-stats" — invalidated by tracker/task write actions.
+//      Uses the service-role admin client (no cookies/headers) so it is safe
+//      inside the cache boundary.  Tag: "analytics-stats" — busted by write actions.
 //   2. React.cache     — deduplicates within a single server render pass
-//      (e.g., layout + page both call this; only one DB trip happens).
+//      (layout + page both call this; only one DB trip happens per request).
+//
+// Auth boundary: getCurrentUser() is called in the OUTER React.cache function
+// (which has normal request context), then only the userId — a plain string — is
+// passed into the unstable_cache callback.  The callback itself never touches
+// cookies() or next/headers.
 
 import { cache } from "react";
 import { unstable_cache } from "next/cache";
 import { getCurrentUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import {
   buildDailyData, buildWeeklyData, buildSubjectData,
   computeCurrentStreak, computeLongestStreak,
@@ -21,10 +27,12 @@ type RawSession = { subject: string; duration_minutes: number; studied_at: strin
 type RawTask    = { completed: boolean };
 
 // ─── Layer 1: persisted cross-request cache keyed by userId ───────────────────
+// Uses getSupabaseAdmin() — no cookies(), safe inside unstable_cache.
+// Every query MUST filter by userId (RLS is bypassed by the admin client).
 
 const _fetchAnalyticsData = unstable_cache(
   async (userId: string): Promise<AnalyticsStats> => {
-    const sb = await createClient();
+    const sb = getSupabaseAdmin();
     const [{ data: rawSessions }, { data: rawTasks }] = await Promise.all([
       sb.from("study_sessions")
         .select("subject, duration_minutes, studied_at")
