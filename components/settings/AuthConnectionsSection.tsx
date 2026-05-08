@@ -27,6 +27,7 @@ import {
   Loader2, Link2, Link2Off, ShieldCheck, KeyRound,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { getSiteUrl } from "@/lib/site-url";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Card } from "@/components/ui/Card";
@@ -281,7 +282,7 @@ function ConnectedAccountsCard({
     setLinkError("");
     const supabase = createClient();
     // Pass next=/settings so the callback route redirects back here after linking.
-    const redirectTo = `${window.location.origin}/auth/callback?next=/settings`;
+    const redirectTo = `${getSiteUrl()}/auth/callback?next=/settings`;
     const { error } = await supabase.auth.linkIdentity({
       provider: "google",
       options:  { redirectTo },

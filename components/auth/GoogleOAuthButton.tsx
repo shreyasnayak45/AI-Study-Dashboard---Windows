@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { getSiteUrl } from "@/lib/site-url";
 
 interface GoogleOAuthButtonProps {
   /** Label shown on the button — defaults to "Continue with Google" */
@@ -20,9 +21,10 @@ export function GoogleOAuthButton({
     setLoading(true);
     const supabase = createClient();
 
-    // Build the callback URL that works on both localhost and production.
-    // window.location.origin resolves to the correct host automatically.
-    const redirectTo = `${window.location.origin}/auth/callback`;
+    // getSiteUrl() prefers NEXT_PUBLIC_SITE_URL (set in Vercel env vars) so
+    // the redirect always matches the Supabase allowlist entry, then falls
+    // back to window.location.origin for local dev.
+    const redirectTo = `${getSiteUrl()}/auth/callback`;
 
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
