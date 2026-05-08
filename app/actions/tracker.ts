@@ -56,6 +56,31 @@ export async function updateSession(
   return { success: true };
 }
 
+export async function saveLiveSession(data: {
+  subject:          string;
+  duration_minutes: number;
+  started_at:       number; // Unix ms — used as the actual studied_at timestamp
+}): Promise<ActionResult> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { success: false, error: "Not authenticated" };
+
+  const { error } = await supabase.from("study_sessions").insert({
+    user_id:          user.id,
+    subject:          data.subject.trim(),
+    duration_minutes: data.duration_minutes,
+    notes:            null,
+    studied_at:       new Date(data.started_at).toISOString(),
+  });
+
+  if (error) return { success: false, error: error.message };
+
+  revalidatePath("/tracker");
+  revalidatePath("/");
+  revalidatePath("/analytics");
+  return { success: true };
+}
+
 export async function deleteSession(id: string): Promise<ActionResult> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();

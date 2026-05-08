@@ -175,6 +175,13 @@ export interface AIDailyInsight {
   generated_at: string;         // ISO timestamptz
 }
 
+// ─── Live session ─────────────────────────────────────────────────────────────
+
+export interface ActiveSession {
+  subject:   string;
+  startedAt: number; // Unix ms — mirrors lib/live-session.ts
+}
+
 // ─── Shared ───────────────────────────────────────────────────────────────────
 
 export interface ActionResult {

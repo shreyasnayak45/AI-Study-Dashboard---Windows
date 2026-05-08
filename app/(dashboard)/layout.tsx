@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
 import { getProfileAndSettings } from "@/lib/settings-stats";
 import { Sidebar } from "@/components/dashboard/Sidebar";
+import { ActiveSessionBanner } from "@/components/tracker/ActiveSessionBanner";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   // Both calls share the getCurrentUser() cache — only one auth.getUser()
@@ -21,6 +22,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
           {children}
         </div>
       </main>
+      {/* Fixed overlay — reads localStorage, renders nothing on SSR */}
+      <ActiveSessionBanner />
     </div>
   );
 }

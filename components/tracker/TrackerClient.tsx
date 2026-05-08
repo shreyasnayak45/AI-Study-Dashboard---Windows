@@ -10,12 +10,14 @@
 // After a create/update/delete, the Server Action calls revalidatePath("/tracker"),
 // which causes Next.js to re-run the Server Component and push fresh data down.
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, BookOpen } from "lucide-react";
+import { Plus, BookOpen, Play, Radio } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { SessionCard } from "./SessionCard";
 import { SessionForm } from "./SessionForm";
+import { LiveSessionPanel } from "./LiveSessionPanel";
+import { getActiveSession, LIVE_SESSION_EVENT } from "@/lib/live-session";
 import { formatDuration } from "@/lib/tracker-utils";
 import type { StudySession } from "@/types";
 
@@ -24,8 +26,22 @@ interface TrackerClientProps {
 }
 
 export function TrackerClient({ sessions }: TrackerClientProps) {
-  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [isFormOpen,    setIsFormOpen]    = useState(false);
+  const [isLiveOpen,    setIsLiveOpen]    = useState(false);
   const [editingSession, setEditingSession] = useState<StudySession | null>(null);
+  const [hasLive,       setHasLive]       = useState(false);
+
+  // Mirror localStorage state so the Live Log button reflects active session
+  useEffect(() => {
+    const sync = () => setHasLive(!!getActiveSession());
+    sync();
+    window.addEventListener(LIVE_SESSION_EVENT, sync);
+    window.addEventListener("storage", sync);
+    return () => {
+      window.removeEventListener(LIVE_SESSION_EVENT, sync);
+      window.removeEventListener("storage", sync);
+    };
+  }, []);
 
   function openAdd() {
     setEditingSession(null);
@@ -64,10 +80,26 @@ export function TrackerClient({ sessions }: TrackerClientProps) {
               : `${sessions.length} session${sessions.length === 1 ? "" : "s"} · ${uniqueSubjects} subject${uniqueSubjects === 1 ? "" : "s"} · ${formatDuration(totalMinutesThisWeek)} this week`}
           </p>
         </div>
-        <Button onClick={openAdd} className="shrink-0">
-          <Plus className="h-4 w-4" />
-          Log session
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          {hasLive ? (
+            // Already running — show status chip instead of opening a new panel
+            <div className="flex items-center gap-1.5 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-xs font-medium text-emerald-400">
+              <Radio className="h-3.5 w-3.5 animate-pulse" />
+              <span className="hidden sm:inline">Session active</span>
+            </div>
+          ) : (
+            <Button variant="ghost" onClick={() => setIsLiveOpen(true)}>
+              <Play className="h-4 w-4" />
+              <span className="hidden sm:inline">Live Log</span>
+              <span className="sm:hidden">Live</span>
+            </Button>
+          )}
+          <Button onClick={openAdd} className="shrink-0">
+            <Plus className="h-4 w-4" />
+            <span className="hidden sm:inline">Log session</span>
+            <span className="sm:hidden">Log</span>
+          </Button>
+        </div>
       </div>
 
       {/* Session grid / empty state */}
@@ -89,11 +121,15 @@ export function TrackerClient({ sessions }: TrackerClientProps) {
         </AnimatePresence>
       )}
 
-      {/* Slide-over form */}
+      {/* Slide-over forms */}
       <SessionForm
         isOpen={isFormOpen}
         onClose={closeForm}
         editingSession={editingSession}
+      />
+      <LiveSessionPanel
+        isOpen={isLiveOpen}
+        onClose={() => setIsLiveOpen(false)}
       />
     </>
   );
