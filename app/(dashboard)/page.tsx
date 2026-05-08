@@ -10,6 +10,7 @@ import { PriorityBadge } from "@/components/tasks/PriorityBadge";
 import { MiniWeeklyChart } from "@/components/analytics/MiniWeeklyChart";
 import { InsightsCard } from "@/components/ai/InsightsCard";
 import { LiveLogButton } from "@/components/tracker/LiveLogButton";
+import { GreetingHeading } from "@/components/dashboard/GreetingHeading";
 import { formatDueDate, dueDateStyle } from "@/lib/task-utils";
 import {
   Clock, BookOpen, Flame, CheckSquare,
@@ -28,9 +29,6 @@ export default async function DashboardPage() {
   const miniData = trackerStats.miniData;
 
   const firstName = user?.user_metadata?.full_name?.split(" ")[0] ?? "there";
-  const hour      = new Date().getHours();
-  const greeting  =
-    hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
 
   const todayHours = (trackerStats.todayMinutes / 60).toFixed(1).replace(/\.0$/, "");
   const weekHours  = (trackerStats.weekMinutes  / 60).toFixed(1).replace(/\.0$/, "");
@@ -41,9 +39,7 @@ export default async function DashboardPage() {
       {/* ── Welcome ───────────────────────────────────────────────── */}
       <div className="mb-8 flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">
-            {greeting}, {firstName} 👋
-          </h1>
+          <GreetingHeading firstName={firstName} />
           <p className="mt-1.5 text-sm text-white/40">
             {trackerStats.totalSessions === 0 && taskStats.total === 0
               ? "Your dashboard is ready — log a session or add a task to get started."
