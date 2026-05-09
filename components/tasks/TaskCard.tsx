@@ -1,12 +1,14 @@
 "use client";
 
-import { memo, useState, useTransition } from "react";
+import { memo, useEffect, useRef, useState, useTransition } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Pencil, Trash2, Calendar, AlignLeft, AlertTriangle } from "lucide-react";
+import { Pencil, Trash2, Calendar, AlignLeft, AlertTriangle, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PriorityBadge } from "./PriorityBadge";
 import { toggleTask, deleteTask } from "@/app/actions/tasks";
 import { formatDueDate, dueDateStyle, isOverdue } from "@/lib/task-utils";
+import { useLongPress } from "@/hooks/useLongPress";
+import { useTouchDevice } from "@/hooks/useTouchDevice";
 import type { Task } from "@/types";
 
 interface TaskCardProps {
@@ -15,19 +17,41 @@ interface TaskCardProps {
 }
 
 export const TaskCard = memo(function TaskCard({ task, onEdit }: TaskCardProps) {
-  // Optimistic completed state — flips instantly on click, reverts on failure
-  const [isCompleted, setIsCompleted] = useState(task.completed);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [togglePending, startToggle]   = useTransition();
-  const [deletePending, startDelete]   = useTransition();
-  const [deleteError,   setDeleteError] = useState("");
+  const isTouch = useTouchDevice();
+  const cardRef = useRef<HTMLDivElement>(null);
 
+  // Optimistic completed state — flips instantly on click, reverts on failure
+  const [isCompleted,   setIsCompleted]   = useState(task.completed);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [mobileOpen,    setMobileOpen]    = useState(false);
+  const [togglePending, startToggle]      = useTransition();
+  const [deletePending, startDelete]      = useTransition();
+  const [deleteError,   setDeleteError]   = useState("");
+
+  // ── Long-press (touch only) ───────────────────────────────────────────────
+  const { handlers: lpHandlers, isPressing } = useLongPress(() => {
+    setMobileOpen(true);
+  });
+
+  // Dismiss mobile action bar when tapping outside the card
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const handler = (e: TouchEvent) => {
+      if (cardRef.current && !cardRef.current.contains(e.target as Node)) {
+        setMobileOpen(false);
+      }
+    };
+    document.addEventListener("touchstart", handler, { passive: true });
+    return () => document.removeEventListener("touchstart", handler);
+  }, [mobileOpen]);
+
+  // ── Actions ───────────────────────────────────────────────────────────────
   function handleToggle() {
     const next = !isCompleted;
-    setIsCompleted(next); // optimistic
+    setIsCompleted(next);
     startToggle(async () => {
       const result = await toggleTask(task.id, next);
-      if (!result.success) setIsCompleted(isCompleted); // revert
+      if (!result.success) setIsCompleted(isCompleted);
     });
   }
 
@@ -42,24 +66,69 @@ export const TaskCard = memo(function TaskCard({ task, onEdit }: TaskCardProps) 
     });
   }
 
-  const dueLabelStr  = formatDueDate(task.due_date);
-  const dueStyle     = dueDateStyle(task.due_date, isCompleted);
-  const pastDue      = !isCompleted && isOverdue(task.due_date);
+  function handleEdit() {
+    setMobileOpen(false);
+    onEdit(task);
+  }
+
+  function handleDeleteRequest() {
+    setMobileOpen(false);
+    setConfirmDelete(true);
+  }
+
+  const dueLabelStr = formatDueDate(task.due_date);
+  const dueStyle    = dueDateStyle(task.due_date, isCompleted);
+  const pastDue     = !isCompleted && isOverdue(task.due_date);
 
   return (
     <motion.div
+      ref={cardRef}
       layout
       initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
+      animate={{
+        opacity: 1,
+        y: 0,
+        // Subtle sink during long-press hold — gives implicit progress feedback
+        scale: isPressing ? 0.975 : 1,
+      }}
       exit={{ opacity: 0, scale: 0.97 }}
-      transition={{ duration: 0.18 }}
+      transition={{
+        opacity: { duration: 0.18 },
+        y:       { duration: 0.18 },
+        scale:   isPressing
+          ? { duration: 0.6, ease: "linear" }  // slow sink over full hold duration
+          : { duration: 0.12, ease: "easeOut" },
+      }}
+      // Touch handlers only wired on touch devices — zero effect on desktop
+      {...(isTouch ? lpHandlers : {})}
       className={cn(
-        "group rounded-2xl border p-5 transition-colors",
-        isCompleted
-          ? "border-white/[0.04] bg-white/[0.015]"
-          : "border-white/[0.06] bg-white/[0.03] hover:border-white/[0.10] hover:bg-white/[0.05]"
+        // Base + shape
+        "relative select-none overflow-hidden rounded-2xl border p-5",
+        // Desktop: standard hover transition (unchanged)
+        "transition-colors",
+        // Colour state
+        mobileOpen
+          ? "border-brand-500/30 bg-brand-500/[0.06]"
+          : isCompleted
+            ? "border-white/[0.04] bg-white/[0.015]"
+            : "border-white/[0.06] bg-white/[0.03] hover:border-white/[0.10] hover:bg-white/[0.05]",
       )}
     >
+      {/* ── Long-press progress ring (touch only) ─────────────────────────── */}
+      <AnimatePresence>
+        {isTouch && isPressing && (
+          <motion.span
+            key="press-ring"
+            className="pointer-events-none absolute inset-0 rounded-2xl border-2 border-brand-400/60"
+            initial={{ opacity: 0, scale: 1 }}
+            animate={{ opacity: 1, scale: 1.015 }}
+            exit={{ opacity: 0, scale: 1 }}
+            transition={{ duration: 0.55, ease: "easeOut" }}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* ── Card body ────────────────────────────────────────────────────── */}
       <div className="flex items-start gap-3">
         {/* Checkbox */}
         <button
@@ -95,7 +164,8 @@ export const TaskCard = memo(function TaskCard({ task, onEdit }: TaskCardProps) 
               {task.title}
             </p>
 
-            {/* Hover actions */}
+            {/* ── Desktop hover actions (opacity-0 → group-hover:opacity-100) ── */}
+            {/* These are intentionally kept exactly as they were.               */}
             <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
               <button
                 onClick={() => onEdit(task)}
@@ -139,7 +209,43 @@ export const TaskCard = memo(function TaskCard({ task, onEdit }: TaskCardProps) 
         </div>
       </div>
 
-      {/* Inline delete confirm */}
+      {/* ── Mobile action bar (touch long-press only) ─────────────────────── */}
+      <AnimatePresence>
+        {isTouch && mobileOpen && (
+          <motion.div
+            key="mobile-actions"
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 4 }}
+            transition={{ duration: 0.14, ease: "easeOut" }}
+            className="mt-3.5 flex items-center gap-2 border-t border-white/[0.06] pt-3.5"
+          >
+            <button
+              onTouchEnd={(e) => { e.stopPropagation(); handleEdit(); }}
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-white/[0.10] bg-white/[0.05] py-2.5 text-xs font-medium text-white/60 active:bg-white/[0.10]"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              Edit
+            </button>
+            <button
+              onTouchEnd={(e) => { e.stopPropagation(); handleDeleteRequest(); }}
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-red-500/25 bg-red-500/10 py-2.5 text-xs font-medium text-red-400 active:bg-red-500/20"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Delete
+            </button>
+            <button
+              onTouchEnd={(e) => { e.stopPropagation(); setMobileOpen(false); }}
+              className="flex items-center justify-center rounded-xl border border-white/[0.06] bg-white/[0.02] p-2.5 text-white/30 active:bg-white/[0.06]"
+              aria-label="Dismiss"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Delete confirmation (shared desktop + mobile) ─────────────────── */}
       <AnimatePresence>
         {confirmDelete && (
           <motion.div
