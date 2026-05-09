@@ -2,9 +2,10 @@
 
 import { Suspense, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Mail, Lock, GraduationCap, ArrowRight } from "lucide-react";
+import { Mail, Lock, ArrowRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -58,8 +59,8 @@ function LoginContent() {
     >
       {/* Header */}
       <div className="mb-7 text-center">
-        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-500/10 ring-1 ring-brand-500/20">
-          <GraduationCap className="h-7 w-7 text-brand-400" />
+        <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-brand-500/5 ring-1 ring-brand-500/20 shadow-[0_0_20px_rgba(99,102,241,0.15)]">
+          <Image src="/logo.png" alt="StudyFlow Logo" width={64} height={64} className="object-cover scale-110" priority />
         </div>
         <h1 className="text-2xl font-bold text-white">Welcome back</h1>
         <p className="mt-1 text-sm text-white/40">Sign in to your study dashboard</p>

@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useState } from "react";
 import { usePathname } from "next/navigation";
-import { GraduationCap, ChevronUp, Menu, X } from "lucide-react";
+import { ChevronUp, Menu, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NAV_ITEMS } from "@/constants/nav";
 import { UserAvatar } from "@/components/ui/UserAvatar";
@@ -44,8 +45,8 @@ export function Sidebar({ user, profile }: SidebarProps) {
         </button>
 
         <div className="flex items-center gap-2">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-500/15 ring-1 ring-brand-500/25">
-            <GraduationCap className="h-4 w-4 text-brand-400" />
+          <div className="flex h-7 w-7 items-center justify-center overflow-hidden rounded-lg bg-brand-500/5 ring-1 ring-brand-500/20">
+            <Image src="/logo.png" alt="StudyFlow Logo" width={28} height={28} className="object-cover scale-110" priority />
           </div>
           <span className="text-sm font-semibold text-white">StudyFlow</span>
         </div>
@@ -89,8 +90,8 @@ export function Sidebar({ user, profile }: SidebarProps) {
 
         {/* Logo */}
         <div className="flex items-center gap-3 px-5 py-5">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-500/15 ring-1 ring-brand-500/25">
-            <GraduationCap className="h-5 w-5 text-brand-400" />
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-brand-500/5 ring-1 ring-brand-500/20 shadow-[0_0_15px_rgba(99,102,241,0.1)]">
+            <Image src="/logo.png" alt="StudyFlow Logo" width={36} height={36} className="object-cover scale-110" priority />
           </div>
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold text-white">StudyFlow</p>

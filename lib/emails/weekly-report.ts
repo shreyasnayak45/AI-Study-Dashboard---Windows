@@ -22,6 +22,7 @@
  */
 
 import { fmtHours } from "@/lib/analytics-utils";
+import { getSiteUrl } from "@/lib/site-url";
 import type { WeeklyReport, WeeklySubject, WeeklyDayStats } from "@/lib/weekly-report/types";
 
 // ─── Palette ──────────────────────────────────────────────────────────────────
@@ -122,7 +123,7 @@ function renderHeader(weekStart: string, weekEnd: string): string {
           <table role="presentation" cellpadding="0" cellspacing="0">
             <tr>
               <td style="vertical-align:middle;padding-right:10px">
-                <div style="width:34px;height:34px;background:${C.brand};border-radius:9px;text-align:center;line-height:34px;font-size:17px">📚</div>
+                <img src="${getSiteUrl()}/logo.png" width="34" height="34" alt="StudyFlow Logo" style="display:block;border-radius:9px;object-fit:cover;background-color:#111118;border:1px solid ${C.border};" />
               </td>
               <td style="vertical-align:middle">
                 <p style="margin:0;font-size:15px;font-weight:700;color:${C.text};letter-spacing:-0.2px">StudyFlow</p>

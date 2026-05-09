@@ -5,6 +5,7 @@
  * blocks and class names.  Tested look: dark card on near-black background,
  * brand-indigo accent bar, clean monospaced meta block.
  */
+import { getSiteUrl } from "@/lib/site-url";
 
 export interface TestEmailProps {
   triggeredBy: string; // user email that clicked the button
@@ -49,7 +50,7 @@ export function buildTestEmailHtml({ triggeredBy, timestamp }: TestEmailProps): 
                 <tr>
                   <td style="padding-right:14px;vertical-align:middle;">
                     <!-- Icon circle -->
-                    <div style="width:42px;height:42px;border-radius:12px;background-color:#6366f1;display:inline-flex;align-items:center;justify-content:center;font-size:20px;line-height:42px;text-align:center;">📚</div>
+                    <img src="${getSiteUrl()}/logo.png" width="42" height="42" alt="StudyFlow Logo" style="display:block;border-radius:12px;object-fit:cover;background-color:#111118;border:1px solid #1e1e2a;box-shadow:0 0 15px rgba(99,102,241,0.15);" />
                   </td>
                   <td style="vertical-align:middle;">
                     <p style="margin:0;font-size:18px;font-weight:700;color:#f4f4f5;letter-spacing:-0.3px;">StudyFlow</p>
