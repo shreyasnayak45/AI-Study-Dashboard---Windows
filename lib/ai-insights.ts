@@ -143,11 +143,14 @@ async function callGemini(ctx: InsightContext): Promise<AIInsightContent | null>
   // ── Intelligence context (when sessions are available) ─────────────────────
   let intelligenceBlock = "";
   let intelligenceSchema = "";
-  let sessionCount = profileStats.totalSessions;
+  let sessionCount   = profileStats.totalSessions;
+  // Hoisted so the mandatory post-parse override can access it without re-computing.
+  let hasTimingData  = false;
 
   if (rawSessions && rawSessions.length > 0) {
     sessionCount = rawSessions.length;
-    const facts = computeIntelligenceFacts(rawSessions);
+    const facts  = computeIntelligenceFacts(rawSessions);
+    hasTimingData = facts.hasTimingData;   // ← captured here; used again below
     const phase: IntelligencePhase = computePhase(facts.activeDays30, sessionCount);
 
     const lastWeekH  = (facts.lastWeekMinutes / 60).toFixed(1).replace(/\.0$/, "");
@@ -172,62 +175,52 @@ ${timingBlock}
 burnout_signals:${burnoutStr}
 phase:${phase}`;
 
-    // ── Phase-specific prompt constraint + JSON schema ──────────────────────
-    // Each phase changes both the *instructions* and the allowed JSON values so
-    // Gemini never overclaims when data is thin.
+    // ── Phase-specific prompt constraints + JSON schema ────────────────────
+    //
+    // TIMING PERSONALITY POLICY — three independent layers of defence:
+    //   Layer 1 (prompt): when no timing data, personality is OMITTED from the
+    //     JSON schema entirely. Gemini never sees the field → can't hallucinate it.
+    //   Layer 2 (prompt instruction): explicit text prohibition on time archetypes.
+    //   Layer 3 (server-side post-parse): sanitiseIntelligence receives hasTimingData
+    //     and overwrites any returned personality with TIMING_UNKNOWN_PERSONALITY.
+    //
+    // The personality field in the schema is ONLY present when hasTimingData === true.
+    // When absent it is injected server-side after parsing (so it never reaches the DB
+    // with a fabricated value).
 
-    // Shared timing constraint — applies at ALL phases
-    const timingConstraint = facts.hasTimingData
-      ? ""  // timing data present — no special constraint needed
+    const personalitySchemaField = facts.hasTimingData
+      // included in schema only when we have real timing evidence
+      ? `,"personality":{"type":"creative 2-4 word name","emoji":"🎯","tagline":"4-6 words","insight":"2-3 sentences based on peak hours"}`
+      // omitted entirely — server injects TIMING_UNKNOWN_PERSONALITY after parsing
+      : "";
+
+    // Shared timing constraint text added to the instruction block
+    const timingInstruction = facts.hasTimingData
+      ? ""
       : `
-TIMING DATA ABSENT — STRICTLY ENFORCE:
-  - Do NOT mention morning / afternoon / evening / night in any field
-  - Do NOT generate time-based personality types (e.g. "Early Bird", "Night Owl", "Afternoon Marathoner")
-  - Do NOT recommend scheduling sessions at specific times of day
-  - personality.type MUST be "Focus Windows Unknown", emoji MUST be "🕐"
-  - personality.insight MUST explain that timing data isn't captured yet and recommend using the live timer`;
+NO TIMING DATA (${facts.timedSessionCount}/${MIN_TIMED_SESSIONS} timed sessions):
+  DO NOT output a "personality" field at all — it will be injected by the server.
+  DO NOT mention morning / afternoon / evening / night in ANY field.
+  DO NOT reference time-of-day in recommendations.`;
 
     if (phase === 1) {
-      // Discovery — fewer than 7 active days OR fewer than 5 sessions.
-      intelligenceBlock += timingConstraint + `
-PHASE 1 CONSTRAINTS (strictly enforce):
-  - burnoutAnalysis.level MUST be "unknown" (not enough data)
-  - personality.type MUST be "Study Pattern Forming", emoji MUST be "🌱" (unless timing absent, then use timing constraint above)
-  - Use ONLY observational language: "so far", "in these early sessions", "beginning to form"
-  - No definitive claims about habits, personality, or risk
-  - Encourage and motivate — the student is just getting started`;
+      intelligenceBlock += timingInstruction + `
+PHASE 1: burnoutAnalysis.level MUST be "unknown". Use only observational language.`;
 
-      const personalityExample = facts.hasTimingData
-        ? `"personality":{"type":"Study Pattern Forming","emoji":"🌱","tagline":"Just Getting Started","insight":"1-2 encouraging sentences about early patterns"}`
-        : `"personality":{"type":"Focus Windows Unknown","emoji":"🕐","tagline":"Timing data needed","insight":"1-2 sentences explaining the live timer unlocks focus analysis"}`;
-
-      intelligenceSchema = `,"intelligence":{"phase":1,"dataConfidence":"low","consistencyNarrative":{"label":"Early Observations","tagline":"1 observational sentence"},"burnoutAnalysis":{"level":"unknown","headline":"Still Learning","insight":"2-3 sentences on needing more data","signals":[]},"${personalityExample},"weeklyNarrative":"1-2 sentences on early progress","recommendations":[{"emoji":"📅","title":"3-5 words","detail":"1-2 sentences"},{"emoji":"🎯","title":"3-5 words","detail":"1-2 sentences"},{"emoji":"🔄","title":"3-5 words","detail":"1-2 sentences"}],"motivationalMessage":"1-2 warm, encouraging sentences"}`;
+      intelligenceSchema = `,"intelligence":{"phase":1,"dataConfidence":"low","consistencyNarrative":{"label":"Early Observations","tagline":"1 observational sentence"},"burnoutAnalysis":{"level":"unknown","headline":"Still Learning","insight":"2-3 sentences on needing more data","signals":[]}${personalitySchemaField},"weeklyNarrative":"1-2 sentences on early progress","recommendations":[{"emoji":"📅","title":"3-5 words","detail":"1-2 sentences"},{"emoji":"🎯","title":"3-5 words","detail":"1-2 sentences"},{"emoji":"🔄","title":"3-5 words","detail":"1-2 sentences"}],"motivationalMessage":"1-2 warm, encouraging sentences"}`;
 
     } else if (phase === 2) {
-      // Pattern Detection — 7–19 active days. Hedged language; emerging patterns.
-      intelligenceBlock += timingConstraint + `
-PHASE 2 CONSTRAINTS (strictly enforce):
-  - Use hedged language: "tends to", "appears to", "early patterns suggest", "so far"
-  - Personality detection allowed (if timing data present) but phrase as emerging
-  - burnoutAnalysis can have a real level but note if data is limited`;
+      intelligenceBlock += timingInstruction + `
+PHASE 2: hedged language — "tends to", "appears to", "early patterns suggest".`;
 
-      const personalityExample = facts.hasTimingData
-        ? `"personality":{"type":"emerging 2-4 word name","emoji":"📚","tagline":"4-6 words","insight":"2-3 sentences"}`
-        : `"personality":{"type":"Focus Windows Unknown","emoji":"🕐","tagline":"Timing data needed","insight":"Explain live timer needed"}`;
-
-      intelligenceSchema = `,"intelligence":{"phase":2,"dataConfidence":"moderate","consistencyNarrative":{"label":"2-3 word emerging style","tagline":"1 hedged sentence"},"burnoutAnalysis":{"level":"low","headline":"3-5 words","insight":"2-3 hedged sentences","signals":[]},"${personalityExample},"weeklyNarrative":"2-3 sentences with hours","recommendations":[{"emoji":"⏰","title":"3-5 words","detail":"1-2 sentences"},{"emoji":"📅","title":"3-5 words","detail":"1-2 sentences"},{"emoji":"🎯","title":"3-5 words","detail":"1-2 sentences"}],"motivationalMessage":"1-2 sentences"}`;
+      intelligenceSchema = `,"intelligence":{"phase":2,"dataConfidence":"moderate","consistencyNarrative":{"label":"2-3 word style","tagline":"1 hedged sentence"},"burnoutAnalysis":{"level":"low","headline":"3-5 words","insight":"2-3 hedged sentences","signals":[]}${personalitySchemaField},"weeklyNarrative":"2-3 sentences with hours","recommendations":[{"emoji":"⏰","title":"3-5 words","detail":"1-2 sentences"},{"emoji":"📅","title":"3-5 words","detail":"1-2 sentences"},{"emoji":"🎯","title":"3-5 words","detail":"1-2 sentences"}],"motivationalMessage":"1-2 sentences"}`;
 
     } else {
-      // AI Coach (phase 3) — 20+ active days. Full confidence.
-      intelligenceBlock += timingConstraint + (facts.hasTimingData
-        ? `\nPHASE 3: Full confidence. Use specific patterns, personality archetypes, and detailed burnout analysis.`
-        : `\nPHASE 3: Full confidence on consistency/burnout/weekly. But timing data is absent — follow timing constraints above.`);
+      intelligenceBlock += timingInstruction + (facts.hasTimingData
+        ? `\nPHASE 3: Full confidence. Specific personality archetypes, detailed burnout analysis.`
+        : `\nPHASE 3: Full confidence on consistency/burnout/weekly only. Follow timing instructions above.`);
 
-      const personalityExample = facts.hasTimingData
-        ? `"personality":{"type":"creative 2-4 word name","emoji":"🎯","tagline":"4-6 words","insight":"2-3 sentences"}`
-        : `"personality":{"type":"Focus Windows Unknown","emoji":"🕐","tagline":"Timing data needed","insight":"Explain live timer needed"}`;
-
-      intelligenceSchema = `,"intelligence":{"phase":3,"dataConfidence":"high","consistencyNarrative":{"label":"2-3 word style","tagline":"1 confident sentence"},"burnoutAnalysis":{"level":"low","headline":"3-5 words","insight":"2-3 sentences","signals":[]},"${personalityExample},"weeklyNarrative":"2-3 sentences with hours","recommendations":[{"emoji":"⏰","title":"3-5 words","detail":"1-2 sentences"},{"emoji":"📅","title":"3-5 words","detail":"1-2 sentences"},{"emoji":"🎯","title":"3-5 words","detail":"1-2 sentences"}],"motivationalMessage":"1-2 sentences"}`;
+      intelligenceSchema = `,"intelligence":{"phase":3,"dataConfidence":"high","consistencyNarrative":{"label":"2-3 word style","tagline":"1 confident sentence"},"burnoutAnalysis":{"level":"low","headline":"3-5 words","insight":"2-3 sentences","signals":[]}${personalitySchemaField},"weeklyNarrative":"2-3 sentences with hours","recommendations":[{"emoji":"⏰","title":"3-5 words","detail":"1-2 sentences"},{"emoji":"📅","title":"3-5 words","detail":"1-2 sentences"},{"emoji":"🎯","title":"3-5 words","detail":"1-2 sentences"}],"motivationalMessage":"1-2 sentences"}`;
     }
   }
 
@@ -266,7 +259,10 @@ Use specific numbers. Warm coach tone. No exclamation marks.`;
     if (!text) return null;
   } catch { return null; }
 
-  const parsed = parseResponse(text);
+  // Layer 3 (mandatory server-side override): parseResponse receives hasTimingData
+  // (hoisted above). sanitiseIntelligence forces TIMING_UNKNOWN_PERSONALITY when
+  // false, regardless of what Gemini returned.
+  const parsed = parseResponse(text, hasTimingData);
   if (!parsed) return null;
 
   // Attach staleness metadata so isCacheStale() can work on the next visit
@@ -370,9 +366,23 @@ function computeIntelligenceFacts(sessions: RawSessionForIntelligence[]) {
   };
 }
 
+// ─── Timing-unknown personality fallback ─────────────────────────────────────
+//
+// Injected by the server whenever session_start_time data is insufficient.
+// This value is NEVER generated by Gemini when hasTimingData === false —
+// the personality field is omitted from the Gemini schema in that case.
+// Even if Gemini hallucinated it anyway, sanitiseIntelligence overwrites it here.
+
+const TIMING_UNKNOWN_PERSONALITY: AIIntelligenceInsight["personality"] = {
+  type:    "Focus Patterns Unknown",
+  emoji:   "🕐",
+  tagline: "Learning Your Study Rhythm",
+  insight: "Use the live timer during study sessions to unlock personalized focus insights and timing analysis.",
+};
+
 // ─── Response parsing ─────────────────────────────────────────────────────────
 
-function parseResponse(raw: string): AIInsightContent | null {
+function parseResponse(raw: string, hasTimingData: boolean): AIInsightContent | null {
   let cleaned = raw.replace(/```json\s*/gi, "").replace(/```\s*/gi, "").trim();
   const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
   if (jsonMatch) cleaned = jsonMatch[0];
@@ -392,41 +402,70 @@ function parseResponse(raw: string): AIInsightContent | null {
       analytics: { summary: p.analytics.summary, observations: (p.analytics.observations as string[]).slice(0, 5) },
     };
 
-    if (p.intelligence && isValidIntelligence(p.intelligence)) {
-      content.intelligence = sanitiseIntelligence(p.intelligence as Record<string, unknown>);
+    if (p.intelligence && isValidIntelligence(p.intelligence, hasTimingData)) {
+      content.intelligence = sanitiseIntelligence(p.intelligence as Record<string, unknown>, hasTimingData);
     }
 
     return content;
   } catch { return null; }
 }
 
-function isValidIntelligence(x: unknown): boolean {
+function isValidIntelligence(x: unknown, hasTimingData: boolean): boolean {
   if (!x || typeof x !== "object") return false;
   const o  = x as Record<string, unknown>;
   const cn = o.consistencyNarrative as Record<string, unknown> | undefined;
   const ba = o.burnoutAnalysis      as Record<string, unknown> | undefined;
   const pe = o.personality          as Record<string, unknown> | undefined;
-  return (
+
+  const coreValid = (
     typeof cn?.label    === "string" && typeof cn?.tagline  === "string" &&
     typeof ba?.level    === "string" && typeof ba?.headline === "string" &&
     typeof ba?.insight  === "string" && Array.isArray(ba?.signals) &&
-    typeof pe?.type     === "string" && typeof pe?.emoji    === "string" &&
-    typeof pe?.tagline  === "string" && typeof pe?.insight  === "string" &&
     typeof o.weeklyNarrative     === "string" &&
     Array.isArray(o.recommendations) &&
     typeof o.motivationalMessage === "string"
   );
-  // Note: phase and dataConfidence are optional in validation — we default them
-  // in sanitiseIntelligence if absent so older cached responses still work.
+  if (!coreValid) return false;
+
+  // Personality is only required in the response when timing data is present.
+  // When absent, Gemini doesn't produce it (it was omitted from the schema),
+  // and sanitiseIntelligence will inject TIMING_UNKNOWN_PERSONALITY instead.
+  if (hasTimingData) {
+    if (
+      typeof pe?.type    !== "string" || typeof pe?.emoji   !== "string" ||
+      typeof pe?.tagline !== "string" || typeof pe?.insight !== "string"
+    ) return false;
+  }
+
+  // Note: phase and dataConfidence are optional — defaulted in sanitiseIntelligence
+  // so older cached responses (before phases were added) still work.
+  return true;
 }
 
-function sanitiseIntelligence(raw: Record<string, unknown>): AIIntelligenceInsight {
+function sanitiseIntelligence(
+  raw:           Record<string, unknown>,
+  hasTimingData: boolean,
+): AIIntelligenceInsight {
   const cn  = raw.consistencyNarrative as Record<string, string>;
   const ba  = raw.burnoutAnalysis      as Record<string, unknown>;
-  const pe  = raw.personality          as Record<string, string>;
   const recs = (raw.recommendations as Array<Record<string, string>>)
     .slice(0, 5)
     .map((r) => ({ emoji: String(r.emoji ?? ""), title: String(r.title ?? ""), detail: String(r.detail ?? "") }));
+
+  // ── Mandatory timing safety override (Layer 3 of 3) ──────────────────────
+  // If timing data is insufficient, ALWAYS use the fallback personality —
+  // discard whatever Gemini may have hallucinated, no exceptions.
+  const personality: AIIntelligenceInsight["personality"] = !hasTimingData
+    ? { ...TIMING_UNKNOWN_PERSONALITY }
+    : (() => {
+        const pe = raw.personality as Record<string, string>;
+        return {
+          type:    String(pe?.type    ?? ""),
+          emoji:   String(pe?.emoji   ?? ""),
+          tagline: String(pe?.tagline ?? ""),
+          insight: String(pe?.insight ?? ""),
+        };
+      })();
 
   // Burnout level — now includes "unknown" for Phase 1
   const rawLevel = String(ba.level ?? "").toLowerCase();
@@ -453,7 +492,7 @@ function sanitiseIntelligence(raw: Record<string, unknown>): AIIntelligenceInsig
     dataConfidence,
     consistencyNarrative: { label: String(cn.label ?? ""), tagline: String(cn.tagline ?? "") },
     burnoutAnalysis: { level, headline: String(ba.headline ?? ""), insight: String(ba.insight ?? ""), signals: (ba.signals as string[]).map(String).slice(0, 5) },
-    personality: { type: String(pe.type ?? ""), emoji: String(pe.emoji ?? ""), tagline: String(pe.tagline ?? ""), insight: String(pe.insight ?? "") },
+    personality,   // ← always safe: TIMING_UNKNOWN_PERSONALITY when !hasTimingData
     weeklyNarrative:     String(raw.weeklyNarrative    ?? ""),
     recommendations:     recs,
     motivationalMessage: String(raw.motivationalMessage ?? ""),
