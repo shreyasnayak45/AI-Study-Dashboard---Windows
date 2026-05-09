@@ -23,7 +23,7 @@
  */
 
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { TrendingUp, TrendingDown, Minus, Zap, RefreshCw, Sparkles } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, Zap, RefreshCw, Sparkles, Sprout, LineChart, BrainCircuit } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { ConsistencyRing } from "@/components/intelligence/ConsistencyRing";
 import { BurnoutCard }     from "@/components/intelligence/BurnoutCard";
@@ -35,6 +35,7 @@ import type {
   RawSessionForIntelligence,
   WeeklyReport,
   AIIntelligenceInsight,
+  IntelligencePhase,
 } from "@/types";
 
 interface Props {
@@ -57,6 +58,10 @@ export function IntelligenceDashboard({
   // Rule-based data — always computed; drives ALL visual components.
   const intel = useMemo(() => computeIntelligence(sessions), [sessions]);
   const { consistency, burnout, bestHours, weeklyReport } = intel;
+
+  // Phase: prefer AI-confirmed value (it may differ from rule-based if sessions
+  // were added since the cache was generated); fall back to rule-based.
+  const phase: IntelligencePhase = aiInsight?.phase ?? intel.phase;
 
   // Auto-trigger: runs once on mount, never blocks render.
   useEffect(() => {
@@ -115,6 +120,9 @@ export function IntelligenceDashboard({
             Study Intelligence
           </h2>
 
+          {/* Phase pill — always visible so users understand data maturity */}
+          <PhasePill phase={phase} />
+
           {/* Subtle status indicator — never blocks content */}
           {aiEnabled && isPending && (
             <span className="flex items-center gap-1 rounded-full bg-white/[0.04] px-2 py-0.5 text-[10px] text-white/25">
@@ -156,11 +164,13 @@ export function IntelligenceDashboard({
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <ConsistencyRing
           consistency={consistency}
+          phase={phase}
           aiLabel={aiConsistency?.label}
           aiTagline={aiConsistency?.tagline}
         />
         <BurnoutCard
           burnout={burnout}
+          phase={phase}
           aiAnalysis={aiInsight?.burnoutAnalysis ?? null}
         />
         {/* Personality — always renders; AI text updates in place */}
@@ -173,7 +183,7 @@ export function IntelligenceDashboard({
 
       {/* ── Row 2: Heatmap ── */}
       <div className="mt-4">
-        <HourlyHeatmap bestHours={bestHours} />
+        <HourlyHeatmap bestHours={bestHours} phase={phase} />
       </div>
 
       {/* ── Row 3: Weekly report · Recommendations ── */}
@@ -186,6 +196,29 @@ export function IntelligenceDashboard({
         <p className="mt-3 text-center text-xs text-white/25">{aiError}</p>
       )}
     </section>
+  );
+}
+
+// ─── Phase pill ───────────────────────────────────────────────────────────────
+
+function PhasePill({ phase }: { phase: IntelligencePhase }) {
+  if (phase === 1) return (
+    <span className="flex items-center gap-1 rounded-full border border-white/[0.08] bg-white/[0.04] px-2 py-0.5 text-[10px] text-white/25">
+      <Sprout className="h-2.5 w-2.5" />
+      Discovery
+    </span>
+  );
+  if (phase === 2) return (
+    <span className="flex items-center gap-1 rounded-full border border-violet-500/15 bg-violet-500/[0.06] px-2 py-0.5 text-[10px] text-violet-400/60">
+      <LineChart className="h-2.5 w-2.5" />
+      Patterns
+    </span>
+  );
+  return (
+    <span className="flex items-center gap-1 rounded-full border border-brand-500/15 bg-brand-500/[0.06] px-2 py-0.5 text-[10px] text-brand-400/70">
+      <BrainCircuit className="h-2.5 w-2.5" />
+      AI Coach
+    </span>
   );
 }
 

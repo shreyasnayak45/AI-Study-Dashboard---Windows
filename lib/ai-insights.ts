@@ -6,8 +6,10 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
 import { getGeminiFlash, isAIEnabled } from "@/lib/gemini";
 import { computeCurrentStreak } from "@/lib/analytics-utils";
+import { computePhase } from "@/lib/intelligence";
 import type {
   AIDailyInsight, AIInsightContent, AIIntelligenceInsight,
+  IntelligencePhase,
   TrackerStats, TaskStats, ProfileStats, RawSessionForIntelligence,
 } from "@/types";
 
@@ -146,6 +148,7 @@ async function callGemini(ctx: InsightContext): Promise<AIInsightContent | null>
   if (rawSessions && rawSessions.length > 0) {
     sessionCount = rawSessions.length;
     const facts = computeIntelligenceFacts(rawSessions);
+    const phase: IntelligencePhase = computePhase(facts.activeDays30, sessionCount);
 
     const lastWeekH  = (facts.lastWeekMinutes / 60).toFixed(1).replace(/\.0$/, "");
     const burnoutStr = [
@@ -160,9 +163,44 @@ async function callGemini(ctx: InsightContext): Promise<AIInsightContent | null>
 score:${facts.score}/100 [freq:${facts.breakdown.frequency}/40 streak:${facts.breakdown.streak}/25 reg:${facts.breakdown.regularity}/20 recent:${facts.breakdown.recentActivity}/15]
 this_week:${(facts.thisWeekMinutes/60).toFixed(1)}h last_week:${lastWeekH}h active_30d:${facts.activeDays30}/30
 UTC_timing: pre-dawn:${facts.buckets.lateNight}m early:${facts.buckets.earlyMorning}m morning:${facts.buckets.morning}m afternoon:${facts.buckets.afternoon}m evening:${facts.buckets.evening}m night:${facts.buckets.night}m
-burnout_signals:${burnoutStr}`;
+burnout_signals:${burnoutStr}
+phase:${phase}`;
 
-    intelligenceSchema = `,"intelligence":{"consistencyNarrative":{"label":"2-3 word style","tagline":"1 sentence"},"burnoutAnalysis":{"level":"low","headline":"3-5 words","insight":"2-3 sentences","signals":[]},"personality":{"type":"creative 2-4 word name","emoji":"🎯","tagline":"4-6 words","insight":"2-3 sentences"},"weeklyNarrative":"2-3 sentences with hours","recommendations":[{"emoji":"⏰","title":"3-5 words","detail":"1-2 sentences"},{"emoji":"📅","title":"3-5 words","detail":"1-2 sentences"},{"emoji":"🎯","title":"3-5 words","detail":"1-2 sentences"}],"motivationalMessage":"1-2 sentences"}`;
+    // ── Phase-specific prompt constraint + JSON schema ──────────────────────
+    // Each phase changes both the *instructions* and the allowed JSON values so
+    // Gemini never overclaims when data is thin.
+
+    if (phase === 1) {
+      // Discovery — fewer than 7 active days OR fewer than 5 sessions.
+      // Be purely observational; enforce "unknown" burnout and the seedling personality.
+      intelligenceBlock += `
+PHASE 1 CONSTRAINTS (strictly enforce):
+  - burnoutAnalysis.level MUST be "unknown" (not enough data)
+  - personality.type MUST be "Study Pattern Forming", emoji MUST be "🌱"
+  - Use ONLY observational language: "so far", "in these early sessions", "beginning to form"
+  - No definitive claims about habits, personality, or risk
+  - Encourage and motivate — the student is just getting started`;
+
+      intelligenceSchema = `,"intelligence":{"phase":1,"dataConfidence":"low","consistencyNarrative":{"label":"Early Observations","tagline":"1 observational sentence about what the data shows so far"},"burnoutAnalysis":{"level":"unknown","headline":"Still Learning","insight":"2-3 sentences explaining more data is needed for burnout assessment","signals":[]},"personality":{"type":"Study Pattern Forming","emoji":"🌱","tagline":"Just Getting Started","insight":"1-2 encouraging sentences about early patterns"},"weeklyNarrative":"1-2 sentences on early weekly progress","recommendations":[{"emoji":"📅","title":"3-5 words","detail":"1-2 sentences"},{"emoji":"🎯","title":"3-5 words","detail":"1-2 sentences"},{"emoji":"🔄","title":"3-5 words","detail":"1-2 sentences"}],"motivationalMessage":"1-2 warm, encouraging sentences"}`;
+
+    } else if (phase === 2) {
+      // Pattern Detection — 7–19 active days. Hedged language; emerging patterns.
+      intelligenceBlock += `
+PHASE 2 CONSTRAINTS (strictly enforce):
+  - Use hedged language: "tends to", "appears to", "early patterns suggest", "so far"
+  - Personality detection allowed but phrase as emerging ("appears to be a...")
+  - burnoutAnalysis can have a real level but note if data is limited
+  - Avoid definitive claims about long-term habits`;
+
+      intelligenceSchema = `,"intelligence":{"phase":2,"dataConfidence":"moderate","consistencyNarrative":{"label":"2-3 word emerging style","tagline":"1 hedged sentence about their pattern"},"burnoutAnalysis":{"level":"low","headline":"3-5 words","insight":"2-3 sentences with appropriate hedging","signals":[]},"personality":{"type":"emerging 2-4 word name","emoji":"📚","tagline":"4-6 words","insight":"2-3 sentences about emerging personality"},"weeklyNarrative":"2-3 sentences with hours and hedging","recommendations":[{"emoji":"⏰","title":"3-5 words","detail":"1-2 sentences"},{"emoji":"📅","title":"3-5 words","detail":"1-2 sentences"},{"emoji":"🎯","title":"3-5 words","detail":"1-2 sentences"}],"motivationalMessage":"1-2 sentences"}`;
+
+    } else {
+      // AI Coach (phase 3) — 20+ active days. Full confidence; specific and actionable.
+      intelligenceBlock += `
+PHASE 3: Full confidence. Use specific patterns, personality archetypes, and detailed burnout analysis. Be specific and actionable.`;
+
+      intelligenceSchema = `,"intelligence":{"phase":3,"dataConfidence":"high","consistencyNarrative":{"label":"2-3 word style","tagline":"1 confident sentence"},"burnoutAnalysis":{"level":"low","headline":"3-5 words","insight":"2-3 sentences","signals":[]},"personality":{"type":"creative 2-4 word name","emoji":"🎯","tagline":"4-6 words","insight":"2-3 sentences"},"weeklyNarrative":"2-3 sentences with hours","recommendations":[{"emoji":"⏰","title":"3-5 words","detail":"1-2 sentences"},{"emoji":"📅","title":"3-5 words","detail":"1-2 sentences"},{"emoji":"🎯","title":"3-5 words","detail":"1-2 sentences"}],"motivationalMessage":"1-2 sentences"}`;
+    }
   }
 
   // ── Concise prompt ──────────────────────────────────────────────────────────
@@ -333,6 +371,8 @@ function isValidIntelligence(x: unknown): boolean {
     Array.isArray(o.recommendations) &&
     typeof o.motivationalMessage === "string"
   );
+  // Note: phase and dataConfidence are optional in validation — we default them
+  // in sanitiseIntelligence if absent so older cached responses still work.
 }
 
 function sanitiseIntelligence(raw: Record<string, unknown>): AIIntelligenceInsight {
@@ -343,11 +383,29 @@ function sanitiseIntelligence(raw: Record<string, unknown>): AIIntelligenceInsig
     .slice(0, 5)
     .map((r) => ({ emoji: String(r.emoji ?? ""), title: String(r.title ?? ""), detail: String(r.detail ?? "") }));
 
+  // Burnout level — now includes "unknown" for Phase 1
   const rawLevel = String(ba.level ?? "").toLowerCase();
   const level: AIIntelligenceInsight["burnoutAnalysis"]["level"] =
-    rawLevel === "high" ? "high" : rawLevel === "moderate" ? "moderate" : "low";
+    rawLevel === "high"     ? "high"     :
+    rawLevel === "moderate" ? "moderate" :
+    rawLevel === "unknown"  ? "unknown"  :
+                              "low";
+
+  // Phase — default to 3 for backwards-compat with cached insights that pre-date phases
+  const rawPhase = Number(raw.phase);
+  const phase: IntelligencePhase =
+    rawPhase === 1 ? 1 : rawPhase === 2 ? 2 : 3;
+
+  // dataConfidence — default to "high" for backwards-compat
+  const rawConf = String(raw.dataConfidence ?? "").toLowerCase();
+  const dataConfidence: AIIntelligenceInsight["dataConfidence"] =
+    rawConf === "low"      ? "low"      :
+    rawConf === "moderate" ? "moderate" :
+                             "high";
 
   return {
+    phase,
+    dataConfidence,
     consistencyNarrative: { label: String(cn.label ?? ""), tagline: String(cn.tagline ?? "") },
     burnoutAnalysis: { level, headline: String(ba.headline ?? ""), insight: String(ba.insight ?? ""), signals: (ba.signals as string[]).map(String).slice(0, 5) },
     personality: { type: String(pe.type ?? ""), emoji: String(pe.emoji ?? ""), tagline: String(pe.tagline ?? ""), insight: String(pe.insight ?? "") },

@@ -6,8 +6,22 @@ import { computeCurrentStreak } from "@/lib/analytics-utils";
 import type {
   ConsistencyScore, BurnoutRisk, BurnoutSignal, BurnoutLevel,
   HourData, BestStudyHours, FocusPersonality, WeeklyReport,
-  IntelligenceData, RawSessionForIntelligence,
+  IntelligenceData, IntelligencePhase, RawSessionForIntelligence,
 } from "@/types";
+
+// ─── Phase computation (exported for use in ai-insights.ts) ──────────────────
+
+/**
+ * Determines the confidence phase based on study history depth.
+ *   Phase 1 — Discovery:         <7 active days in the last 30d OR <5 total sessions
+ *   Phase 2 — Pattern Detection: 7–19 active days in the last 30d
+ *   Phase 3 — AI Coach:          20+ active days in the last 30d
+ */
+export function computePhase(activeDays30: number, totalSessions: number): IntelligencePhase {
+  if (activeDays30 < 7 || totalSessions < 5) return 1;
+  if (activeDays30 < 20) return 2;
+  return 3;
+}
 
 // ─── Public entry point ───────────────────────────────────────────────────────
 
@@ -15,6 +29,7 @@ export function computeIntelligence(
   sessions: RawSessionForIntelligence[],
 ): IntelligenceData {
   if (sessions.length === 0) return emptyIntelligence();
+
 
   const now = new Date();
 
@@ -30,8 +45,11 @@ export function computeIntelligence(
   const recent14 = sessions.filter((s) => new Date(s.studied_at) >= cutoff14);
   const recent7  = sessions.filter((s) => new Date(s.studied_at) >= cutoff7);
 
-  // ── Consistency Score ────────────────────────────────────────────────────
+  // ── Phase (data-confidence level) ───────────────────────────────────────
   const activeDays30 = new Set(recent30.map((s) => s.studied_at.split("T")[0])).size;
+  const phase = computePhase(activeDays30, sessions.length);
+
+  // ── Consistency Score ────────────────────────────────────────────────────
   const frequencyScore = Math.min(40, (activeDays30 / 30) * 40);
 
   const allDateStrings = sessions.map((s) => s.studied_at.split("T")[0]);
@@ -77,7 +95,7 @@ export function computeIntelligence(
   // ── Recommendations ──────────────────────────────────────────────────────
   const recommendations = generateRecommendations(consistency, burnout, bestHours, weeklyReport);
 
-  return { consistency, burnout, bestHours, personality, weeklyReport, recommendations };
+  return { phase, consistency, burnout, bestHours, personality, weeklyReport, recommendations };
 }
 
 // ─── Score label + ring color ────────────────────────────────────────────────
@@ -320,6 +338,7 @@ function generateRecommendations(
 
 function emptyIntelligence(): IntelligenceData {
   return {
+    phase: 1,
     consistency: {
       score: 0, label: "Starting Out", color: "text-white/40", ringColor: "#6b7280",
       breakdown: { frequency: 0, streak: 0, regularity: 0, recentActivity: 0 },

@@ -2,10 +2,11 @@
 
 import { Card } from "@/components/ui/Card";
 import { fmtHours } from "@/lib/analytics-utils";
-import type { BestStudyHours } from "@/types";
+import type { BestStudyHours, IntelligencePhase } from "@/types";
 
 interface Props {
   bestHours: BestStudyHours;
+  phase:     IntelligencePhase;
 }
 
 // Tick marks shown below the bar chart (every 6 hours)
@@ -28,7 +29,7 @@ function periodLabel(hour: number): string {
   return "Late night";
 }
 
-export function HourlyHeatmap({ bestHours }: Props) {
+export function HourlyHeatmap({ bestHours, phase }: Props) {
   const { hours, peakHour, peakLabel } = bestHours;
   const hasData = hours.some((h) => h.minutes > 0);
 
@@ -90,6 +91,13 @@ export function HourlyHeatmap({ bestHours }: Props) {
       {!hasData && (
         <p className="mt-3 text-center text-xs text-white/30">
           Log sessions to see when you study best
+        </p>
+      )}
+
+      {/* Phase 1: accuracy caveat — heatmap shows real data but note its limits */}
+      {hasData && phase === 1 && (
+        <p className="mt-3 border-t border-white/[0.05] pt-3 text-center text-[11px] text-white/25">
+          More sessions will sharpen this pattern — early data can shift.
         </p>
       )}
     </Card>

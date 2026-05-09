@@ -174,13 +174,26 @@ export interface AIInsightContent {
 
 // ─── AI Intelligence (deep study-pattern analysis) ────────────────────────────
 
+/**
+ * Confidence phase the AI assigned based on how much data exists.
+ *   1 = Discovery      (<7 active days OR <5 sessions)  — observational, no firm claims
+ *   2 = Pattern        (7–19 active days)                — hedged, emerging patterns
+ *   3 = AI Coach       (20+ active days)                 — fully confident, specific
+ */
+export type IntelligencePhase = 1 | 2 | 3;
+
 export interface AIIntelligenceInsight {
+  /** Phase the AI was operating in when this insight was generated. */
+  phase:          IntelligencePhase;
+  dataConfidence: "low" | "moderate" | "high";
+
   consistencyNarrative: {
     label:   string;  // e.g. "Steady Builder", "Night Owl", "Sprint Learner"
     tagline: string;  // 1 natural sentence about their consistency pattern
   };
   burnoutAnalysis: {
-    level:    "high" | "moderate" | "low";
+    /** "unknown" is used in Phase 1 when there is insufficient data to assess risk. */
+    level:    "high" | "moderate" | "low" | "unknown";
     headline: string;   // e.g. "Healthy Pace", "Signs of Overload"
     insight:  string;   // 2-3 sentences analysing their work/rest balance
     signals:  string[]; // natural-language descriptions of each risk signal
@@ -259,6 +272,8 @@ export interface WeeklyReport {
 }
 
 export interface IntelligenceData {
+  /** Rule-based phase computed from activeDays30 + totalSessions. */
+  phase:           IntelligencePhase;
   consistency:     ConsistencyScore;
   burnout:         BurnoutRisk;
   bestHours:       BestStudyHours;
