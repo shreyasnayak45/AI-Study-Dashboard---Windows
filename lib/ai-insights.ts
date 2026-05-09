@@ -322,9 +322,18 @@ Use specific numbers. Warm coach tone. No exclamation marks.`;
     }
 
     const finishReason = candidate.finishReason;
-    if (finishReason && finishReason !== "STOP" && finishReason !== "MAX_TOKENS") {
-      console.error("[ai-insights] Unexpected finishReason:", finishReason);
+    // Only bail on explicitly unsafe stops. Gemini 2.5 Flash routinely returns
+    // "OTHER" for normal completions — treating it as an error caused silent
+    // null-returns on every generation, writing no cache and surfacing the
+    // "unavailable" error to the user on every page load.
+    const HARMFUL_FINISH_REASONS = new Set(["SAFETY", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII"]);
+    if (finishReason && HARMFUL_FINISH_REASONS.has(finishReason)) {
+      console.error("[ai-insights] Gemini blocked output due to safety policy:", finishReason);
       return null;
+    }
+    if (finishReason && finishReason !== "STOP" && finishReason !== "MAX_TOKENS") {
+      // Log non-standard reasons but continue — OTHER / RECITATION still produce usable text.
+      console.warn("[ai-insights] Non-standard finishReason (continuing):", finishReason);
     }
 
     // Filter thinking parts (gemini-2.5-flash internal reasoning tokens)
@@ -347,11 +356,27 @@ Use specific numbers. Warm coach tone. No exclamation marks.`;
   // false, regardless of what Gemini returned.
   const parsed = parseResponse(text, hasTimingData);
   if (!parsed) {
-    console.error("[ai-insights] parseResponse() returned null — Gemini output failed validation. Raw text (first 500 chars):", text.slice(0, 500));
+    // Log the full raw text so the exact Gemini output is visible in Vercel
+    // function logs for schema-mismatch debugging.
+    console.error("[ai-insights] parseResponse() returned null — validation failed.\nRaw Gemini text:\n", text);
     return null;
   }
 
-  const content = hasTimingData ? parsed : sanitiseTimingLanguage(parsed);
+  // Post-process: strip timing language from every field when we have no real
+  // session_start_time data.  Wrapped in try/catch — a failure here should
+  // fall back to the unprocessed (but still valid) parsed content rather than
+  // silently turning the entire generation into a null.
+  let content: AIInsightContent;
+  if (hasTimingData) {
+    content = parsed;
+  } else {
+    try {
+      content = sanitiseTimingLanguage(parsed);
+    } catch (err) {
+      console.error("[ai-insights] sanitiseTimingLanguage threw — falling back to unsanitised content:", err);
+      content = parsed;
+    }
+  }
 
   // Attach staleness metadata so isCacheStale() can work on the next visit
   content.metadata = { sessionCount, intelligence_version: INTELLIGENCE_VERSION };
