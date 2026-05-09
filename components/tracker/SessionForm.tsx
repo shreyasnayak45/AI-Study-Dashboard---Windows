@@ -41,6 +41,7 @@ const EMPTY_FORM: SessionFormData = {
   duration_minutes: 60,
   notes: "",
   studied_at: todayDateString(),
+  session_start_time: "",
 };
 
 export function SessionForm({ isOpen, onClose, editingSession }: SessionFormProps) {
@@ -55,11 +56,20 @@ export function SessionForm({ isOpen, onClose, editingSession }: SessionFormProp
       // Convert stored ISO timestamp back to YYYY-MM-DD for the date input
       const d = new Date(editingSession.studied_at);
       const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+      // Recover HH:MM from session_start_time for the time input (if present)
+      let timeStr = "";
+      if (editingSession.session_start_time) {
+        const t = new Date(editingSession.session_start_time);
+        timeStr = `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`;
+      }
+
       setForm({
         subject: editingSession.subject,
         duration_minutes: editingSession.duration_minutes,
         notes: editingSession.notes ?? "",
         studied_at: dateStr,
+        session_start_time: timeStr,
       });
     } else {
       setForm({ ...EMPTY_FORM, studied_at: todayDateString() });
@@ -230,6 +240,26 @@ export function SessionForm({ isOpen, onClose, editingSession }: SessionFormProp
                   {errors.studied_at && (
                     <p className="text-xs text-red-400">{errors.studied_at}</p>
                   )}
+                </div>
+
+                {/* Session start time (optional) */}
+                <div className="space-y-1.5">
+                  <label className="block text-sm font-medium text-white/60">
+                    <Clock className="mr-1.5 inline h-3.5 w-3.5" />
+                    Session start time
+                    <span className="ml-1 text-white/30">(optional — unlocks peak hour analysis)</span>
+                  </label>
+                  <input
+                    type="time"
+                    value={form.session_start_time ?? ""}
+                    onChange={(e) =>
+                      setForm({ ...form, session_start_time: e.target.value || "" })
+                    }
+                    className="w-full rounded-xl border border-white/[0.08] bg-white/[0.04] px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-brand-500/30 [color-scheme:dark]"
+                  />
+                  <p className="text-[11px] text-white/25">
+                    When did you start studying? Live timer sessions capture this automatically.
+                  </p>
                 </div>
 
                 {/* Notes */}

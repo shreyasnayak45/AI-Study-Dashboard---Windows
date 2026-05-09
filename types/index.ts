@@ -10,7 +10,17 @@ export interface StudySession {
   subject: string;
   duration_minutes: number;
   notes: string | null;
-  studied_at: string;   // ISO 8601 timestamptz
+  studied_at: string;            // ISO 8601 timestamptz (date only for manual — noon placeholder)
+  /**
+   * The real start time of the session.
+   * - Live-timer sessions: set to the browser's session-start Unix ms, converted to ISO.
+   * - Manual sessions with a user-supplied start time: the combined date+time ISO string.
+   * - Manual sessions without a start time (legacy): NULL.
+   *
+   * ⚠️  Only use this field for .getHours() / time-of-day analysis.
+   *     `studied_at` is only reliable for date-level (YYYY-MM-DD) comparisons.
+   */
+  session_start_time: string | null;
   created_at: string;
 }
 
@@ -18,7 +28,9 @@ export interface SessionFormData {
   subject: string;
   duration_minutes: number;
   notes: string;
-  studied_at: string;   // YYYY-MM-DD
+  studied_at: string;          // YYYY-MM-DD
+  /** Optional HH:MM string from the time input. Combined with studied_at on save. */
+  session_start_time?: string; // "HH:MM" | "" | undefined
 }
 
 export interface TrackerStats {
@@ -253,9 +265,16 @@ export interface HourData {
 }
 
 export interface BestStudyHours {
-  peakHour:  number | null;
-  peakLabel: string;
-  hours:     HourData[];  // always 24 items
+  peakHour:            number | null;
+  peakLabel:           string;
+  /**
+   * Number of sessions that have a real `session_start_time` (not null).
+   * Only these sessions are used for time-of-day analysis.
+   */
+  timingDataCount:     number;
+  /** true when timingDataCount >= MIN_TIMED_SESSIONS (currently 5). */
+  hasEnoughTimingData: boolean;
+  hours:               HourData[];  // always 24 items; zero-filled when !hasEnoughTimingData
 }
 
 export interface FocusPersonality {
@@ -284,9 +303,21 @@ export interface IntelligenceData {
 
 /** Minimal session shape needed by the intelligence engine. */
 export interface RawSessionForIntelligence {
-  duration_minutes: number;
-  studied_at:       string;   // ISO 8601 timestamptz from Supabase
-  subject?:         string;   // optional — used by the AI intelligence prompt
+  duration_minutes:  number;
+  /**
+   * ISO 8601 timestamptz from Supabase.
+   * ⚠️ For manual sessions this is noon on the chosen date (YYYY-MM-DDT12:00:00Z) —
+   *    only reliable for date-level comparisons (split("T")[0]).
+   *    Use `session_start_time` for any .getHours() / time-of-day logic.
+   */
+  studied_at:        string;
+  /**
+   * Real session start time. Present for live-timer sessions and manual sessions
+   * where the user explicitly entered a start time. NULL for legacy / date-only records.
+   * This is the ONLY field that may be used for `.getHours()` calls.
+   */
+  session_start_time: string | null;
+  subject?:           string;   // optional — used by the AI intelligence prompt
 }
 
 // ─── Live session ─────────────────────────────────────────────────────────────

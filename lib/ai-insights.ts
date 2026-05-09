@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
 import { getGeminiFlash, isAIEnabled } from "@/lib/gemini";
 import { computeCurrentStreak } from "@/lib/analytics-utils";
-import { computePhase } from "@/lib/intelligence";
+import { computePhase, MIN_TIMED_SESSIONS } from "@/lib/intelligence";
 import type {
   AIDailyInsight, AIInsightContent, AIIntelligenceInsight,
   IntelligencePhase,
@@ -159,10 +159,16 @@ async function callGemini(ctx: InsightContext): Promise<AIInsightContent | null>
       facts.burnoutSignals.hasOverloadedDay && "day >6h",
     ].filter(Boolean).join(", ") || "none";
 
+    // Timing data block — only included when we have MIN_TIMED_SESSIONS real timestamps.
+    // If absent, Gemini gets an explicit prohibition on time-of-day claims.
+    const timingBlock = facts.hasTimingData
+      ? `UTC_timing(${facts.timedSessionCount} timed sessions): pre-dawn:${facts.buckets.lateNight}m early:${facts.buckets.earlyMorning}m morning:${facts.buckets.morning}m afternoon:${facts.buckets.afternoon}m evening:${facts.buckets.evening}m night:${facts.buckets.night}m`
+      : `timing_data: NONE (${facts.timedSessionCount}/${MIN_TIMED_SESSIONS} timed sessions — user studies manually without the live timer)`;
+
     intelligenceBlock = `
 score:${facts.score}/100 [freq:${facts.breakdown.frequency}/40 streak:${facts.breakdown.streak}/25 reg:${facts.breakdown.regularity}/20 recent:${facts.breakdown.recentActivity}/15]
 this_week:${(facts.thisWeekMinutes/60).toFixed(1)}h last_week:${lastWeekH}h active_30d:${facts.activeDays30}/30
-UTC_timing: pre-dawn:${facts.buckets.lateNight}m early:${facts.buckets.earlyMorning}m morning:${facts.buckets.morning}m afternoon:${facts.buckets.afternoon}m evening:${facts.buckets.evening}m night:${facts.buckets.night}m
+${timingBlock}
 burnout_signals:${burnoutStr}
 phase:${phase}`;
 
@@ -170,36 +176,58 @@ phase:${phase}`;
     // Each phase changes both the *instructions* and the allowed JSON values so
     // Gemini never overclaims when data is thin.
 
+    // Shared timing constraint — applies at ALL phases
+    const timingConstraint = facts.hasTimingData
+      ? ""  // timing data present — no special constraint needed
+      : `
+TIMING DATA ABSENT — STRICTLY ENFORCE:
+  - Do NOT mention morning / afternoon / evening / night in any field
+  - Do NOT generate time-based personality types (e.g. "Early Bird", "Night Owl", "Afternoon Marathoner")
+  - Do NOT recommend scheduling sessions at specific times of day
+  - personality.type MUST be "Focus Windows Unknown", emoji MUST be "🕐"
+  - personality.insight MUST explain that timing data isn't captured yet and recommend using the live timer`;
+
     if (phase === 1) {
       // Discovery — fewer than 7 active days OR fewer than 5 sessions.
-      // Be purely observational; enforce "unknown" burnout and the seedling personality.
-      intelligenceBlock += `
+      intelligenceBlock += timingConstraint + `
 PHASE 1 CONSTRAINTS (strictly enforce):
   - burnoutAnalysis.level MUST be "unknown" (not enough data)
-  - personality.type MUST be "Study Pattern Forming", emoji MUST be "🌱"
+  - personality.type MUST be "Study Pattern Forming", emoji MUST be "🌱" (unless timing absent, then use timing constraint above)
   - Use ONLY observational language: "so far", "in these early sessions", "beginning to form"
   - No definitive claims about habits, personality, or risk
   - Encourage and motivate — the student is just getting started`;
 
-      intelligenceSchema = `,"intelligence":{"phase":1,"dataConfidence":"low","consistencyNarrative":{"label":"Early Observations","tagline":"1 observational sentence about what the data shows so far"},"burnoutAnalysis":{"level":"unknown","headline":"Still Learning","insight":"2-3 sentences explaining more data is needed for burnout assessment","signals":[]},"personality":{"type":"Study Pattern Forming","emoji":"🌱","tagline":"Just Getting Started","insight":"1-2 encouraging sentences about early patterns"},"weeklyNarrative":"1-2 sentences on early weekly progress","recommendations":[{"emoji":"📅","title":"3-5 words","detail":"1-2 sentences"},{"emoji":"🎯","title":"3-5 words","detail":"1-2 sentences"},{"emoji":"🔄","title":"3-5 words","detail":"1-2 sentences"}],"motivationalMessage":"1-2 warm, encouraging sentences"}`;
+      const personalityExample = facts.hasTimingData
+        ? `"personality":{"type":"Study Pattern Forming","emoji":"🌱","tagline":"Just Getting Started","insight":"1-2 encouraging sentences about early patterns"}`
+        : `"personality":{"type":"Focus Windows Unknown","emoji":"🕐","tagline":"Timing data needed","insight":"1-2 sentences explaining the live timer unlocks focus analysis"}`;
+
+      intelligenceSchema = `,"intelligence":{"phase":1,"dataConfidence":"low","consistencyNarrative":{"label":"Early Observations","tagline":"1 observational sentence"},"burnoutAnalysis":{"level":"unknown","headline":"Still Learning","insight":"2-3 sentences on needing more data","signals":[]},"${personalityExample},"weeklyNarrative":"1-2 sentences on early progress","recommendations":[{"emoji":"📅","title":"3-5 words","detail":"1-2 sentences"},{"emoji":"🎯","title":"3-5 words","detail":"1-2 sentences"},{"emoji":"🔄","title":"3-5 words","detail":"1-2 sentences"}],"motivationalMessage":"1-2 warm, encouraging sentences"}`;
 
     } else if (phase === 2) {
       // Pattern Detection — 7–19 active days. Hedged language; emerging patterns.
-      intelligenceBlock += `
+      intelligenceBlock += timingConstraint + `
 PHASE 2 CONSTRAINTS (strictly enforce):
   - Use hedged language: "tends to", "appears to", "early patterns suggest", "so far"
-  - Personality detection allowed but phrase as emerging ("appears to be a...")
-  - burnoutAnalysis can have a real level but note if data is limited
-  - Avoid definitive claims about long-term habits`;
+  - Personality detection allowed (if timing data present) but phrase as emerging
+  - burnoutAnalysis can have a real level but note if data is limited`;
 
-      intelligenceSchema = `,"intelligence":{"phase":2,"dataConfidence":"moderate","consistencyNarrative":{"label":"2-3 word emerging style","tagline":"1 hedged sentence about their pattern"},"burnoutAnalysis":{"level":"low","headline":"3-5 words","insight":"2-3 sentences with appropriate hedging","signals":[]},"personality":{"type":"emerging 2-4 word name","emoji":"📚","tagline":"4-6 words","insight":"2-3 sentences about emerging personality"},"weeklyNarrative":"2-3 sentences with hours and hedging","recommendations":[{"emoji":"⏰","title":"3-5 words","detail":"1-2 sentences"},{"emoji":"📅","title":"3-5 words","detail":"1-2 sentences"},{"emoji":"🎯","title":"3-5 words","detail":"1-2 sentences"}],"motivationalMessage":"1-2 sentences"}`;
+      const personalityExample = facts.hasTimingData
+        ? `"personality":{"type":"emerging 2-4 word name","emoji":"📚","tagline":"4-6 words","insight":"2-3 sentences"}`
+        : `"personality":{"type":"Focus Windows Unknown","emoji":"🕐","tagline":"Timing data needed","insight":"Explain live timer needed"}`;
+
+      intelligenceSchema = `,"intelligence":{"phase":2,"dataConfidence":"moderate","consistencyNarrative":{"label":"2-3 word emerging style","tagline":"1 hedged sentence"},"burnoutAnalysis":{"level":"low","headline":"3-5 words","insight":"2-3 hedged sentences","signals":[]},"${personalityExample},"weeklyNarrative":"2-3 sentences with hours","recommendations":[{"emoji":"⏰","title":"3-5 words","detail":"1-2 sentences"},{"emoji":"📅","title":"3-5 words","detail":"1-2 sentences"},{"emoji":"🎯","title":"3-5 words","detail":"1-2 sentences"}],"motivationalMessage":"1-2 sentences"}`;
 
     } else {
-      // AI Coach (phase 3) — 20+ active days. Full confidence; specific and actionable.
-      intelligenceBlock += `
-PHASE 3: Full confidence. Use specific patterns, personality archetypes, and detailed burnout analysis. Be specific and actionable.`;
+      // AI Coach (phase 3) — 20+ active days. Full confidence.
+      intelligenceBlock += timingConstraint + (facts.hasTimingData
+        ? `\nPHASE 3: Full confidence. Use specific patterns, personality archetypes, and detailed burnout analysis.`
+        : `\nPHASE 3: Full confidence on consistency/burnout/weekly. But timing data is absent — follow timing constraints above.`);
 
-      intelligenceSchema = `,"intelligence":{"phase":3,"dataConfidence":"high","consistencyNarrative":{"label":"2-3 word style","tagline":"1 confident sentence"},"burnoutAnalysis":{"level":"low","headline":"3-5 words","insight":"2-3 sentences","signals":[]},"personality":{"type":"creative 2-4 word name","emoji":"🎯","tagline":"4-6 words","insight":"2-3 sentences"},"weeklyNarrative":"2-3 sentences with hours","recommendations":[{"emoji":"⏰","title":"3-5 words","detail":"1-2 sentences"},{"emoji":"📅","title":"3-5 words","detail":"1-2 sentences"},{"emoji":"🎯","title":"3-5 words","detail":"1-2 sentences"}],"motivationalMessage":"1-2 sentences"}`;
+      const personalityExample = facts.hasTimingData
+        ? `"personality":{"type":"creative 2-4 word name","emoji":"🎯","tagline":"4-6 words","insight":"2-3 sentences"}`
+        : `"personality":{"type":"Focus Windows Unknown","emoji":"🕐","tagline":"Timing data needed","insight":"Explain live timer needed"}`;
+
+      intelligenceSchema = `,"intelligence":{"phase":3,"dataConfidence":"high","consistencyNarrative":{"label":"2-3 word style","tagline":"1 confident sentence"},"burnoutAnalysis":{"level":"low","headline":"3-5 words","insight":"2-3 sentences","signals":[]},"${personalityExample},"weeklyNarrative":"2-3 sentences with hours","recommendations":[{"emoji":"⏰","title":"3-5 words","detail":"1-2 sentences"},{"emoji":"📅","title":"3-5 words","detail":"1-2 sentences"},{"emoji":"🎯","title":"3-5 words","detail":"1-2 sentences"}],"motivationalMessage":"1-2 sentences"}`;
     }
   }
 
@@ -246,7 +274,12 @@ Use specific numbers. Warm coach tone. No exclamation marks.`;
   return parsed;
 }
 
-// ─── Server-side intelligence facts (UTC-based) ───────────────────────────────
+// ─── Server-side intelligence facts ──────────────────────────────────────────
+//
+// TIMING DATA POLICY (mirrors lib/intelligence.ts):
+//   Hour buckets and late-night burnout are computed from `session_start_time` ONLY.
+//   `studied_at` for manual sessions is set to T12:00:00 (noon placeholder) — using
+//   its UTC hours for time-of-day analysis would produce completely fabricated data.
 
 function computeIntelligenceFacts(sessions: RawSessionForIntelligence[]) {
   const now    = new Date();
@@ -258,7 +291,7 @@ function computeIntelligenceFacts(sessions: RawSessionForIntelligence[]) {
   const recent14 = sessions.filter((s) => new Date(s.studied_at) >= new Date(now.getTime() - MS_14D));
   const recent30 = sessions.filter((s) => new Date(s.studied_at) >= new Date(now.getTime() - MS_30D));
 
-  // Score
+  // Score (all duration/date-based — safe for all sessions)
   const activeDays30   = new Set(recent30.map((s) => s.studied_at.split("T")[0])).size;
   const frequencyScore = Math.min(40, (activeDays30 / 30) * 40);
   const streak         = computeCurrentStreak(sessions.map((s) => s.studied_at.split("T")[0]));
@@ -286,17 +319,27 @@ function computeIntelligenceFacts(sessions: RawSessionForIntelligence[]) {
   const dayMap7      = new Map<string, number>();
   for (const s of recent7) { const k = s.studied_at.split("T")[0]; dayMap7.set(k, (dayMap7.get(k) ?? 0) + s.duration_minutes); }
 
+  // Late-night: ONLY from session_start_time — never studied_at
+  const timedRecent7 = recent7.filter((s) => s.session_start_time != null);
   const burnoutSignals = {
     hasLongSession:   recent7.some((s) => s.duration_minutes > 180),
-    hasLateNight:     recent7.some((s) => new Date(s.studied_at).getUTCHours() >= 22),
+    hasLateNight:     timedRecent7.some((s) => new Date(s.session_start_time!).getUTCHours() >= 22),
     hasSharpDrop:     lastWeekMins >= 300 && thisWeekMins < lastWeekMins * 0.5,
     hasErratic:       durations14.length >= 4 && cv14 > 0.9,
     hasOverloadedDay: Array.from(dayMap7.values()).some((m) => m > 360),
   };
 
-  // UTC hour buckets
+  // Hour buckets — ONLY sessions with real session_start_time
+  const timedSessions      = sessions.filter((s) => s.session_start_time != null);
+  const timedSessionCount  = timedSessions.length;
+  const hasTimingData      = timedSessionCount >= MIN_TIMED_SESSIONS;
+
   const ht = new Array<number>(24).fill(0);
-  for (const s of sessions) ht[new Date(s.studied_at).getUTCHours()] += s.duration_minutes;
+  if (hasTimingData) {
+    for (const s of timedSessions) {
+      ht[new Date(s.session_start_time!).getUTCHours()] += s.duration_minutes;
+    }
+  }
   const buckets = {
     lateNight:    ht.slice(0,  4).reduce((a, b) => a + b, 0),
     earlyMorning: ht.slice(4,  8).reduce((a, b) => a + b, 0),
@@ -306,7 +349,7 @@ function computeIntelligenceFacts(sessions: RawSessionForIntelligence[]) {
     night:        ht.slice(21, 24).reduce((a, b) => a + b, 0),
   };
 
-  // Weekly comparison (Sun–Sat local-ish using UTC)
+  // Weekly comparison (Sun–Sat)
   const dow       = now.getDay();
   const weekStart = new Date(now); weekStart.setDate(now.getDate() - dow); weekStart.setHours(0, 0, 0, 0);
   const lastStart = new Date(weekStart); lastStart.setDate(weekStart.getDate() - 7);
@@ -320,6 +363,8 @@ function computeIntelligenceFacts(sessions: RawSessionForIntelligence[]) {
     activeDays30,
     burnoutSignals,
     buckets,
+    timedSessionCount,
+    hasTimingData,
     thisWeekMinutes,
     lastWeekMinutes,
   };

@@ -1,6 +1,16 @@
 // PURE / CLIENT-SAFE — no server imports.
 // All new Date() calls that use .getHours() intentionally run client-side inside
 // IntelligenceDashboard (loaded with ssr: false) so they use the browser's local timezone.
+//
+// TIMING DATA POLICY:
+//   .getHours() is called ONLY on `session_start_time`, never on `studied_at`.
+//   `studied_at` for manual sessions is set to noon (T12:00:00) on the chosen date —
+//   a placeholder that shifts with timezone and has nothing to do with actual study time.
+//   `session_start_time` is only present for:
+//     - Live-timer sessions (real browser start timestamp)
+//     - Manual sessions where the user explicitly entered a start time
+//   When `session_start_time` is null, the session has no reliable timing data and
+//   is excluded from ALL time-of-day analysis.
 
 import { computeCurrentStreak } from "@/lib/analytics-utils";
 import type {
@@ -8,6 +18,22 @@ import type {
   HourData, BestStudyHours, FocusPersonality, WeeklyReport,
   IntelligenceData, IntelligencePhase, RawSessionForIntelligence,
 } from "@/types";
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+/**
+ * Minimum number of sessions with real timing data (`session_start_time != null`)
+ * required before any time-of-day analysis is enabled.
+ *
+ * Below this threshold:
+ *   - Heatmap shows "Still learning your focus windows"
+ *   - Personality is "Just Getting Started" (no time-based archetypes)
+ *   - Burnout late-night signal is skipped
+ *   - Gemini receives an explicit "no timing data" instruction
+ *
+ * Exported so ai-insights.ts uses the same value.
+ */
+export const MIN_TIMED_SESSIONS = 5;
 
 // ─── Phase computation (exported for use in ai-insights.ts) ──────────────────
 
@@ -29,7 +55,6 @@ export function computeIntelligence(
   sessions: RawSessionForIntelligence[],
 ): IntelligenceData {
   if (sessions.length === 0) return emptyIntelligence();
-
 
   const now = new Date();
 
@@ -84,10 +109,11 @@ export function computeIntelligence(
   const burnout = computeBurnoutRisk(recent7, recent14, cutoff7);
 
   // ── Best Study Hours ─────────────────────────────────────────────────────
+  // Uses session_start_time exclusively — never studied_at.
   const bestHours = computeBestStudyHours(sessions);
 
   // ── Focus Personality ────────────────────────────────────────────────────
-  const personality = computePersonality(sessions, bestHours.peakHour);
+  const personality = computePersonality(sessions, bestHours);
 
   // ── Weekly Report ────────────────────────────────────────────────────────
   const weeklyReport = computeWeeklyReport(sessions, now);
@@ -129,7 +155,7 @@ function computeBurnoutRisk(
 ): BurnoutRisk {
   const signals: BurnoutSignal[] = [];
 
-  // 1. Marathon session (> 3 h) in the last 7 days
+  // 1. Marathon session (> 3 h) in the last 7 days — uses duration, always available
   if (recent7.some((s) => s.duration_minutes > 180)) {
     signals.push({
       label: "Marathon sessions",
@@ -137,8 +163,10 @@ function computeBurnoutRisk(
     });
   }
 
-  // 2. Late-night study (hour ≥ 22) in the last 7 days
-  if (recent7.some((s) => new Date(s.studied_at).getHours() >= 22)) {
+  // 2. Late-night study (hour ≥ 22) in the last 7 days.
+  //    ONLY use session_start_time — studied_at is noon for manual sessions.
+  const timedRecent7 = recent7.filter((s) => s.session_start_time != null);
+  if (timedRecent7.some((s) => new Date(s.session_start_time!).getHours() >= 22)) {
     signals.push({
       label: "Late-night sessions",
       description: "Studying after 10 PM disrupts sleep and memory consolidation",
@@ -156,7 +184,7 @@ function computeBurnoutRisk(
     });
   }
 
-  // 4. Erratic durations (CV > 0.9) in last 14 days
+  // 4. Erratic durations (CV > 0.9) in last 14 days — uses duration, always available
   if (recent14.length >= 4) {
     const durations = recent14.map((s) => s.duration_minutes);
     const mean = durations.reduce((a, b) => a + b, 0) / durations.length;
@@ -171,7 +199,7 @@ function computeBurnoutRisk(
     }
   }
 
-  // 5. Single day > 6 h in last 7 days
+  // 5. Single day > 6 h in last 7 days — aggregated by date, always available
   const dayMap7 = new Map<string, number>();
   for (const s of recent7) {
     const k = s.studied_at.split("T")[0];
@@ -198,11 +226,34 @@ function computeBurnoutRisk(
 }
 
 // ─── Best Study Hours ─────────────────────────────────────────────────────────
+//
+// USES session_start_time EXCLUSIVELY.
+// `studied_at` is deliberately NOT used here because manual sessions set it to
+// noon (T12:00:00), which would produce a fake "everyone studies at noon" heatmap.
 
 function computeBestStudyHours(sessions: RawSessionForIntelligence[]): BestStudyHours {
+  // Only sessions with a real start time feed the heatmap.
+  const timedSessions = sessions.filter((s) => s.session_start_time != null);
+  const timingDataCount = timedSessions.length;
+  const hasEnoughTimingData = timingDataCount >= MIN_TIMED_SESSIONS;
+
+  // Return an empty (but structurally valid) heatmap when data is insufficient.
+  if (!hasEnoughTimingData) {
+    return {
+      peakHour: null,
+      peakLabel: "—",
+      timingDataCount,
+      hasEnoughTimingData: false,
+      hours: Array.from({ length: 24 }, (_, h) => ({
+        hour: h, label: formatHourLabel(h), minutes: 0, intensity: 0,
+      })),
+    };
+  }
+
   const totals = new Array<number>(24).fill(0);
-  for (const s of sessions) {
-    totals[new Date(s.studied_at).getHours()] += s.duration_minutes;
+  for (const s of timedSessions) {
+    // session_start_time is guaranteed non-null here (filter above)
+    totals[new Date(s.session_start_time!).getHours()] += s.duration_minutes;
   }
 
   const max = Math.max(...totals);
@@ -218,6 +269,8 @@ function computeBestStudyHours(sessions: RawSessionForIntelligence[]): BestStudy
   return {
     peakHour,
     peakLabel: peakHour !== null ? formatHourLabel(peakHour) : "—",
+    timingDataCount,
+    hasEnoughTimingData: true,
     hours,
   };
 }
@@ -230,18 +283,42 @@ function formatHourLabel(h: number): string {
 }
 
 // ─── Focus Personality ────────────────────────────────────────────────────────
+//
+// Time-based archetypes are ONLY assigned when real timing data is available.
+// Without it we return a truthful "not enough timing data" fallback.
 
 function computePersonality(
   sessions: RawSessionForIntelligence[],
-  peakHour: number | null,
+  bestHours: BestStudyHours,
 ): FocusPersonality {
-  if (sessions.length < 3 || peakHour === null) {
+  const { peakHour, hasEnoughTimingData, timingDataCount } = bestHours;
+
+  if (!hasEnoughTimingData) {
+    if (timingDataCount === 0) {
+      // No timed sessions at all — user hasn't used the live timer yet
+      return {
+        type:        "Focus Windows Unknown",
+        emoji:       "🕐",
+        description: "Use the live timer when you study — it tracks your real session times and unlocks your focus personality.",
+      };
+    }
+    // Has some timed sessions but not the minimum
+    const needed = MIN_TIMED_SESSIONS - timingDataCount;
+    return {
+      type:        "Pattern Emerging",
+      emoji:       "🌱",
+      description: `${needed} more timed session${needed !== 1 ? "s" : ""} to reveal your focus personality. Keep using the live timer.`,
+    };
+  }
+
+  if (peakHour === null) {
     return {
       type:        "Just Getting Started",
       emoji:       "🌱",
-      description: "Log a few more sessions to unlock your study personality.",
+      description: "Log a few more sessions to discover your study personality.",
     };
   }
+
   if (peakHour >= 5  && peakHour <= 8)  return { type: "Early Bird",         emoji: "🐦", description: "You thrive in the quiet of the early morning." };
   if (peakHour >= 9  && peakHour <= 11) return { type: "Morning Scholar",    emoji: "📚", description: "Fresh morning energy powers your deepest focus." };
   if (peakHour >= 12 && peakHour <= 14) return { type: "Midday Powerhouse",  emoji: "☀️", description: "You harness the energy of the day at its peak." };
@@ -315,8 +392,11 @@ function generateRecommendations(
     recs.push("⏰ Standardise your session lengths — predictable durations build a stronger habit loop.");
   }
 
-  if (bestHours.peakHour !== null) {
+  // Only include a peak-hour recommendation when we have real timing data.
+  if (bestHours.hasEnoughTimingData && bestHours.peakHour !== null) {
     recs.push(`🎯 Your peak focus window is around ${bestHours.peakLabel} — schedule your hardest material then.`);
+  } else if (!bestHours.hasEnoughTimingData) {
+    recs.push("⏱️ Use the live timer when you study — it reveals your natural focus windows over time.");
   }
 
   if (weekly.trend === "down" && Math.abs(weekly.changePercent) > 20) {
@@ -349,13 +429,14 @@ function emptyIntelligence(): IntelligenceData {
     },
     bestHours: {
       peakHour: null, peakLabel: "—",
+      timingDataCount: 0, hasEnoughTimingData: false,
       hours: Array.from({ length: 24 }, (_, h) => ({
         hour: h, label: formatHourLabel(h), minutes: 0, intensity: 0,
       })),
     },
     personality: {
-      type: "Just Getting Started", emoji: "🌱",
-      description: "Log a few sessions to discover your study personality.",
+      type: "Focus Windows Unknown", emoji: "🕐",
+      description: "Use the live timer when you study to unlock your focus personality.",
     },
     weeklyReport: { thisWeekMinutes: 0, lastWeekMinutes: 0, changePercent: 0, trend: "flat" },
     recommendations: [

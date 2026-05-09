@@ -124,7 +124,7 @@ export const getRawSessions = cache(async (): Promise<RawSessionForIntelligence[
   const sb = await createClient();
   const { data } = await sb
     .from("study_sessions")
-    .select("duration_minutes, studied_at, subject")
+    .select("duration_minutes, studied_at, session_start_time, subject")
     .eq("user_id", user.id)
     .order("studied_at", { ascending: true });
 

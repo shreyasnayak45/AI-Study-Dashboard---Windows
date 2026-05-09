@@ -5,9 +5,10 @@
  *
  * WHY ssr:false?
  * ──────────────
- * computeIntelligence calls new Date(s.studied_at).getHours() for the 24-hour
- * heatmap and burnout detection. On the server this returns UTC hours; in the
- * browser it returns the user's local hours. ssr:false guarantees correct timezone.
+ * computeIntelligence calls new Date(s.session_start_time).getHours() for the
+ * 24-hour heatmap and burnout detection. session_start_time is only set for live
+ * sessions and manual sessions with an explicit start time — never inferred.
+ * ssr:false guarantees local-timezone accuracy via the browser's Date API.
  *
  * PERFORMANCE MODEL — "show instantly, update silently"
  * ──────────────────────────────────────────────────────
