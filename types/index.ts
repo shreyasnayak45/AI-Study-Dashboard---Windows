@@ -175,6 +175,75 @@ export interface AIDailyInsight {
   generated_at: string;         // ISO timestamptz
 }
 
+// ─── Intelligence ─────────────────────────────────────────────────────────────
+
+export interface ConsistencyScore {
+  score:     number;  // 0–100 total
+  label:     string;  // "Excellent" | "Strong" | "Good" | "Building" | "Inconsistent" | "Starting Out"
+  color:     string;  // Tailwind text-color class
+  ringColor: string;  // Hex for SVG stroke
+  breakdown: {
+    frequency:      number;  // 0–40 pts
+    streak:         number;  // 0–25 pts
+    regularity:     number;  // 0–20 pts
+    recentActivity: number;  // 0–15 pts
+  };
+}
+
+export type BurnoutLevel = "high" | "moderate" | "low";
+
+export interface BurnoutSignal {
+  label:       string;
+  description: string;
+}
+
+export interface BurnoutRisk {
+  level:   BurnoutLevel;
+  signals: BurnoutSignal[];
+  advice:  string;
+}
+
+export interface HourData {
+  hour:      number;  // 0–23
+  label:     string;  // "12am", "9am", "12pm" …
+  minutes:   number;
+  intensity: number;  // 0–1 normalised to peak hour
+}
+
+export interface BestStudyHours {
+  peakHour:  number | null;
+  peakLabel: string;
+  hours:     HourData[];  // always 24 items
+}
+
+export interface FocusPersonality {
+  type:        string;
+  emoji:       string;
+  description: string;
+}
+
+export interface WeeklyReport {
+  thisWeekMinutes: number;
+  lastWeekMinutes: number;
+  changePercent:   number;  // signed integer
+  trend:           "up" | "down" | "flat" | "new";
+}
+
+export interface IntelligenceData {
+  consistency:     ConsistencyScore;
+  burnout:         BurnoutRisk;
+  bestHours:       BestStudyHours;
+  personality:     FocusPersonality;
+  weeklyReport:    WeeklyReport;
+  recommendations: string[];
+}
+
+/** Minimal session shape needed by the intelligence engine. */
+export interface RawSessionForIntelligence {
+  duration_minutes: number;
+  studied_at:       string;  // ISO 8601 timestamptz from Supabase
+}
+
 // ─── Live session ─────────────────────────────────────────────────────────────
 
 export interface ActiveSession {

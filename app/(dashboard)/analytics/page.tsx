@@ -1,12 +1,13 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { Suspense } from "react";
-import { getAnalyticsStats } from "@/lib/analytics-stats";
+import { getAnalyticsStats, getRawSessions } from "@/lib/analytics-stats";
 import { generateInsights, fmtHours } from "@/lib/analytics-utils";
 import { getCachedInsight } from "@/lib/ai-insights";
 import { isAIEnabled } from "@/lib/gemini";
 import { Card } from "@/components/ui/Card";
-import { AnalyticsInsights } from "@/components/ai/AnalyticsInsights";
+import { AnalyticsInsights }    from "@/components/ai/AnalyticsInsights";
+import { IntelligenceSection } from "@/components/intelligence/IntelligenceSection";
 import {
   Clock, Flame, CheckSquare, CalendarDays, TrendingUp,
   Star, Target, BookOpen, BarChart2, Plus,
@@ -53,9 +54,12 @@ function AIInsightsSkeleton() {
 export default async function AnalyticsPage() {
   const aiEnabled = isAIEnabled();
 
-  // Only await stats — AI insight streams separately via Suspense below.
-  // On second+ visits, unstable_cache returns stats in <5 ms.
-  const stats   = await getAnalyticsStats();
+  // Fetch stats and raw sessions in parallel. Both are React.cache'd so a
+  // second call on the same request (e.g. from layout) is free.
+  const [stats, rawSessions] = await Promise.all([
+    getAnalyticsStats(),
+    getRawSessions(),
+  ]);
   const insights = generateInsights(stats);
 
   const totalHours   = (stats.totalMinutes / 60).toFixed(1).replace(/\.0$/, "");
@@ -140,6 +144,11 @@ export default async function AnalyticsPage() {
             <PerformanceCard stats={stats} />
           </div>
 
+          {/* ── Study Intelligence ───────────────────────────────────── */}
+          <div className="mt-8">
+            <IntelligenceSection sessions={rawSessions} />
+          </div>
+
           {/* ── Static insights ──────────────────────────────────────── */}
           {insights.length > 0 && (
             <InsightsSection insights={insights} />
@@ -159,7 +168,7 @@ export default async function AnalyticsPage() {
   );
 }
 
-// ─── Skeleton ─────────────────────────────────────────────────────────────────
+// ─── Skeletons ────────────────────────────────────────────────────────────────
 
 function ChartCardSkeleton({ height }: { height: number }) {
   return (
@@ -169,6 +178,7 @@ function ChartCardSkeleton({ height }: { height: number }) {
     />
   );
 }
+
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 

@@ -14,7 +14,7 @@ import {
   buildDailyData, buildWeeklyData, buildSubjectData,
   computeCurrentStreak, computeLongestStreak,
 } from "@/lib/analytics-utils";
-import type { AnalyticsStats, ProfileStats } from "@/types";
+import type { AnalyticsStats, ProfileStats, RawSessionForIntelligence } from "@/types";
 
 type RawSession = { subject: string; duration_minutes: number; studied_at: string };
 type RawTask    = { completed: boolean };
@@ -110,6 +110,25 @@ export const getProfileStats = cache(async (): Promise<ProfileStats> => {
     : 0;
 
   return { totalSessions: sessions.length, totalMinutes, streak, taskCompletionRate, tasksTotal };
+});
+
+/**
+ * Minimal session list for the client-side intelligence engine.
+ * Selects only the two fields the engine needs, ordered oldest-first.
+ * React.cache deduplicates within a single render pass.
+ */
+export const getRawSessions = cache(async (): Promise<RawSessionForIntelligence[]> => {
+  const user = await getCurrentUser();
+  if (!user) return [];
+
+  const sb = await createClient();
+  const { data } = await sb
+    .from("study_sessions")
+    .select("duration_minutes, studied_at")
+    .eq("user_id", user.id)
+    .order("studied_at", { ascending: true });
+
+  return (data ?? []) as RawSessionForIntelligence[];
 });
 
 // ─── Private ─────────────────────────────────────────────────────────────────
