@@ -4,7 +4,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { getCachedInsight, generateAndStoreInsight } from "@/lib/ai-insights";
 import { getTrackerStats } from "@/lib/tracker-stats";
 import { getTaskStats } from "@/lib/task-stats";
-import { getProfileStats } from "@/lib/analytics-stats";
+import { getProfileStats, getRawSessions } from "@/lib/analytics-stats";
 import type { ActionResult, AIDailyInsight } from "@/types";
 
 type InsightResult = ActionResult & { insight?: AIDailyInsight };
@@ -25,7 +25,7 @@ export async function getOrGenerateInsight(): Promise<InsightResult> {
 
 /**
  * Force-regenerates insights regardless of today's cache.
- * Called by the Refresh button.
+ * Called by the Refresh button in InsightsCard and IntelligenceDashboard.
  */
 export async function refreshInsight(): Promise<InsightResult> {
   const user = await getCurrentUser();
@@ -34,17 +34,24 @@ export async function refreshInsight(): Promise<InsightResult> {
   return runGeneration();
 }
 
-// ─── Shared generation logic ─────────────────────────────────────────────────
+// ─── Shared generation logic ──────────────────────────────────────────────────
 
 async function runGeneration(): Promise<InsightResult> {
-  // All three calls use React.cache — no redundant DB queries within this action
-  const [trackerStats, taskStats, profileStats] = await Promise.all([
+  // All calls use React.cache — no redundant DB queries within this action.
+  // rawSessions gives Gemini the full session history for intelligence analysis.
+  const [trackerStats, taskStats, profileStats, rawSessions] = await Promise.all([
     getTrackerStats(),
     getTaskStats(),
     getProfileStats(),
+    getRawSessions(),
   ]);
 
-  const insight = await generateAndStoreInsight({ trackerStats, taskStats, profileStats });
+  const insight = await generateAndStoreInsight({
+    trackerStats,
+    taskStats,
+    profileStats,
+    rawSessions,
+  });
 
   if (!insight) {
     return { success: false, error: "Could not generate insights. Check your GEMINI_API_KEY." };

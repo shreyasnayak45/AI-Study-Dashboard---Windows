@@ -163,8 +163,33 @@ export interface AIInsightAnalytics {
 }
 
 export interface AIInsightContent {
-  dashboard: AIInsightDashboard;
-  analytics:  AIInsightAnalytics;
+  dashboard:    AIInsightDashboard;
+  analytics:    AIInsightAnalytics;
+  intelligence?: AIIntelligenceInsight;  // added by the intelligence analysis pass
+}
+
+// ─── AI Intelligence (deep study-pattern analysis) ────────────────────────────
+
+export interface AIIntelligenceInsight {
+  consistencyNarrative: {
+    label:   string;  // e.g. "Steady Builder", "Night Owl", "Sprint Learner"
+    tagline: string;  // 1 natural sentence about their consistency pattern
+  };
+  burnoutAnalysis: {
+    level:    "high" | "moderate" | "low";
+    headline: string;   // e.g. "Healthy Pace", "Signs of Overload"
+    insight:  string;   // 2-3 sentences analysing their work/rest balance
+    signals:  string[]; // natural-language descriptions of each risk signal
+  };
+  personality: {
+    type:    string;  // e.g. "The Evening Deep-Diver", "The Morning Sprint"
+    emoji:   string;  // single emoji
+    tagline: string;  // punchy 4-6 word phrase
+    insight: string;  // 2-3 sentences about their study personality
+  };
+  weeklyNarrative:    string;  // narrative comparing this week vs last
+  recommendations:    Array<{ emoji: string; title: string; detail: string }>;
+  motivationalMessage: string; // short, warm, personal
 }
 
 export interface AIDailyInsight {
@@ -241,7 +266,8 @@ export interface IntelligenceData {
 /** Minimal session shape needed by the intelligence engine. */
 export interface RawSessionForIntelligence {
   duration_minutes: number;
-  studied_at:       string;  // ISO 8601 timestamptz from Supabase
+  studied_at:       string;   // ISO 8601 timestamptz from Supabase
+  subject?:         string;   // optional — used by the AI intelligence prompt
 }
 
 // ─── Live session ─────────────────────────────────────────────────────────────

@@ -5,6 +5,8 @@ import type { ConsistencyScore } from "@/types";
 
 interface Props {
   consistency: ConsistencyScore;
+  aiLabel?:   string;   // Gemini-generated label (overrides rule-based)
+  aiTagline?: string;   // Gemini-generated one-line description
 }
 
 const RADIUS       = 52;
@@ -20,8 +22,9 @@ const BREAKDOWN_LABELS = [
   { key: "recentActivity" as const, label: "Recent",      max: 15, color: "bg-amber-500"   },
 ];
 
-export function ConsistencyRing({ consistency }: Props) {
+export function ConsistencyRing({ consistency, aiLabel, aiTagline }: Props) {
   const { score, label, color, ringColor, breakdown } = consistency;
+  const displayLabel = aiLabel || label;
 
   const dashOffset = CIRCUMFERENCE * (1 - score / 100);
 
@@ -59,7 +62,7 @@ export function ConsistencyRing({ consistency }: Props) {
           <div className="absolute inset-0 flex flex-col items-center justify-center">
             <span className="text-2xl font-bold text-white leading-none">{score}</span>
             <span className={`mt-0.5 text-[10px] font-semibold uppercase tracking-wide ${color}`}>
-              {label}
+              {displayLabel}
             </span>
           </div>
         </div>
@@ -88,6 +91,13 @@ export function ConsistencyRing({ consistency }: Props) {
           })}
         </div>
       </div>
+
+      {/* ── AI tagline ── */}
+      {aiTagline && (
+        <p className="mt-3 border-t border-white/[0.05] pt-3 text-xs leading-relaxed text-white/40">
+          {aiTagline}
+        </p>
+      )}
     </Card>
   );
 }

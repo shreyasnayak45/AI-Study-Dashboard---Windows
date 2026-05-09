@@ -1,21 +1,24 @@
 "use client";
 
 /**
- * Thin client-component shell whose only job is to host the `ssr: false`
- * dynamic import. next/dynamic with ssr: false is not allowed in Server
- * Components — it must live in a "use client" file.
+ * Thin client-component shell whose only job is to host the ssr:false dynamic
+ * import. next/dynamic with ssr:false is not allowed in Server Components — it
+ * must live in a "use client" file.
  *
- * The actual IntelligenceDashboard is loaded lazily in the browser, which
- * ensures all new Date().getHours() calls use the user's local timezone
- * instead of the server's UTC clock.
+ * Passes aiEnabled and initialAiInsight straight through to IntelligenceDashboard
+ * so it can hydrate immediately with cached AI text (no loading flash on repeat
+ * visits) or auto-generate on first visit.
  */
 
 import dynamic from "next/dynamic";
-import type { RawSessionForIntelligence } from "@/types";
+import type { RawSessionForIntelligence, AIIntelligenceInsight } from "@/types";
 
 function Skeleton() {
   return (
     <div className="space-y-4" aria-busy="true">
+      {/* Section header placeholder */}
+      <div className="h-7 w-40 animate-pulse rounded-lg bg-white/[0.04]" />
+      {/* Row 1: 3 cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {[192, 160, 160].map((h, i) => (
           <div
@@ -25,9 +28,11 @@ function Skeleton() {
           />
         ))}
       </div>
+      {/* Row 2: heatmap */}
       <div className="h-28 animate-pulse rounded-2xl border border-white/[0.06] bg-white/[0.02]" />
+      {/* Row 3: 2 cards */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {[156, 156].map((h, i) => (
+        {[160, 160].map((h, i) => (
           <div
             key={i}
             className="animate-pulse rounded-2xl border border-white/[0.06] bg-white/[0.02]"
@@ -48,9 +53,17 @@ const IntelligenceDashboard = dynamic(
 );
 
 interface Props {
-  sessions: RawSessionForIntelligence[];
+  sessions:         RawSessionForIntelligence[];
+  initialAiInsight: AIIntelligenceInsight | null;
+  aiEnabled:        boolean;
 }
 
-export function IntelligenceSection({ sessions }: Props) {
-  return <IntelligenceDashboard sessions={sessions} />;
+export function IntelligenceSection({ sessions, initialAiInsight, aiEnabled }: Props) {
+  return (
+    <IntelligenceDashboard
+      sessions={sessions}
+      initialAiInsight={initialAiInsight}
+      aiEnabled={aiEnabled}
+    />
+  );
 }

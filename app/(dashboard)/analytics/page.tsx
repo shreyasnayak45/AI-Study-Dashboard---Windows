@@ -54,11 +54,13 @@ function AIInsightsSkeleton() {
 export default async function AnalyticsPage() {
   const aiEnabled = isAIEnabled();
 
-  // Fetch stats and raw sessions in parallel. Both are React.cache'd so a
-  // second call on the same request (e.g. from layout) is free.
-  const [stats, rawSessions] = await Promise.all([
+  // Fetch stats, sessions, and today's AI insight in parallel.
+  // getCachedInsight is React.cache'd — the AIAnalyticsSection Suspense below
+  // calls it again and receives the same in-flight promise for free.
+  const [stats, rawSessions, initialInsight] = await Promise.all([
     getAnalyticsStats(),
     getRawSessions(),
+    aiEnabled ? getCachedInsight() : Promise.resolve(null),
   ]);
   const insights = generateInsights(stats);
 
@@ -146,7 +148,11 @@ export default async function AnalyticsPage() {
 
           {/* ── Study Intelligence ───────────────────────────────────── */}
           <div className="mt-8">
-            <IntelligenceSection sessions={rawSessions} />
+            <IntelligenceSection
+              sessions={rawSessions}
+              initialAiInsight={initialInsight?.content?.intelligence ?? null}
+              aiEnabled={aiEnabled}
+            />
           </div>
 
           {/* ── Static insights ──────────────────────────────────────── */}
