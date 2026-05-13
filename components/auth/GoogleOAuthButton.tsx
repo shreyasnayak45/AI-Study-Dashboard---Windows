@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { getSiteUrl } from "@/lib/site-url";
 
@@ -15,33 +16,83 @@ export function GoogleOAuthButton({
   label = "Continue with Google",
   onError,
 }: GoogleOAuthButtonProps) {
+  const router = useRouter();
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const desktop = window.studyflowDesktop;
+    if (!desktop) return;
+
+    return desktop.onAuthCallback(async ({ code, error }) => {
+      if (error || !code) {
+        setLoading(false);
+        onError?.(error || "Google sign-in failed. Please try again.");
+        return;
+      }
+
+      const supabase = createClient();
+      const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+      setLoading(false);
+
+      if (exchangeError) {
+        onError?.(exchangeError.message);
+        return;
+      }
+
+      router.push("/");
+      router.refresh();
+    });
+  }, [onError, router]);
 
   async function handleClick() {
     setLoading(true);
-    const supabase = createClient();
+    try {
+      const supabase = createClient();
+      const desktop = window.studyflowDesktop;
 
-    // getSiteUrl() prefers NEXT_PUBLIC_SITE_URL (set in Vercel env vars) so
-    // the redirect always matches the Supabase allowlist entry, then falls
-    // back to window.location.origin for local dev.
-    const redirectTo = `${getSiteUrl()}/auth/callback`;
+      // getSiteUrl() prefers NEXT_PUBLIC_SITE_URL (set in Vercel env vars) so
+      // the redirect always matches the Supabase allowlist entry, then falls
+      // back to window.location.origin for local dev.
+      const redirectTo = desktop
+        ? await desktop.getOAuthCallbackUrl()
+        : `${getSiteUrl()}/auth/callback`;
 
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo,
-        queryParams: {
-          // Request offline access so Supabase gets a refresh token.
-          access_type: "offline",
-          // Always show the account picker so users can choose accounts.
-          prompt: "select_account",
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo,
+          skipBrowserRedirect: Boolean(desktop),
+          queryParams: {
+            // Request offline access so Supabase gets a refresh token.
+            access_type: "offline",
+            // Always show the account picker so users can choose accounts.
+            prompt: "select_account",
+          },
         },
-      },
-    });
+      });
 
-    if (error) {
+      if (error) {
+        setLoading(false);
+        onError?.(error.message);
+        return;
+      }
+
+      if (desktop) {
+        if (!data.url) {
+          setLoading(false);
+          onError?.("Could not start Google sign-in. Please try again.");
+          return;
+        }
+
+        const result = await desktop.openExternalAuthUrl(data.url);
+        if (!result.ok) {
+          setLoading(false);
+          onError?.("Could not open Google sign-in in your browser.");
+        }
+      }
+    } catch (error) {
       setLoading(false);
-      onError?.(error.message);
+      onError?.(error instanceof Error ? error.message : "Could not start Google sign-in.");
     }
     // On success the browser is redirected — no need to setLoading(false).
   }

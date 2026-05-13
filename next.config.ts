@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   devIndicators: false,
+  output: "standalone",
 
   // Only import the specific icon/component exports that are actually used,
   // instead of loading the entire package. Reduces JS bundle size and

@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import dynamic from "next/dynamic";
 import {
   User, Mail, Bell, Target, Trash2, Download,
-  CheckCircle, XCircle, Loader2,
+  CheckCircle, XCircle, Loader2, RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -95,6 +95,39 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export function SettingsClient({ user, profile, settings }: Props) {
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+  const [updateStatus, setUpdateStatus] = useState<Status | null>(null);
+  const [updatePending, setUpdatePending] = useState(false);
+
+  useEffect(() => {
+    const desktop = window.studyflowDesktop;
+    if (!desktop) return;
+
+    desktop
+      .getAppVersion()
+      .then(setAppVersion)
+      .catch(() => setAppVersion("Unavailable"));
+
+    return desktop.onUpdateStatus((message) => {
+      setUpdateStatus({
+        ok: !/error|fail/i.test(message),
+        text: message,
+      });
+      setUpdatePending(false);
+    });
+  }, []);
+
+  async function handleCheckUpdates() {
+    const desktop = window.studyflowDesktop;
+    if (!desktop) return;
+
+    setUpdatePending(true);
+    setUpdateStatus({ ok: true, text: "Checking for updates..." });
+
+    const result = await desktop.checkForUpdates();
+    setUpdateStatus({ ok: result.ok, text: result.message });
+    setUpdatePending(false);
+  }
   // ── Account ──────────────────────────────────────────────────────
   const [avatarUrl,   setAvatarUrl]    = useState<string | null>(profile?.avatar_url ?? null);
   const [displayName, setDisplayName]  = useState(profile?.display_name ?? "");
@@ -326,6 +359,33 @@ export function SettingsClient({ user, profile, settings }: Props) {
 
         {/* ── Password Login + Connected Accounts ─────────────────── */}
         <AuthConnectionsSection user={user} />
+
+        {appVersion !== null && (
+          <section>
+            <SectionTitle>Desktop App</SectionTitle>
+            <Card className="p-6">
+              <div className="flex flex-col gap-4 rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-medium text-white/80">StudyFlow for Windows</p>
+                  <p className="text-xs text-white/35">Version {appVersion ?? "Loading..."}</p>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  loading={updatePending}
+                  onClick={handleCheckUpdates}
+                  className="w-full shrink-0 sm:w-auto"
+                >
+                  {!updatePending && <RefreshCw className="h-3.5 w-3.5" />}
+                  Check for updates
+                </Button>
+              </div>
+
+              <StatusMsg status={updateStatus} />
+            </Card>
+          </section>
+        )}
 
         {/* ── Danger zone ─────────────────────────────────────────── */}
         <section>
