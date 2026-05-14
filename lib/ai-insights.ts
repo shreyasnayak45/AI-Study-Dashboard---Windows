@@ -2,13 +2,15 @@
 // Do NOT import from any "use client" component.
 
 import { cache } from "react";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
-import { getGeminiFlash, isAIEnabled } from "@/lib/gemini";
+import { getGeminiModel, getGeminiModelNames, isAIEnabled } from "@/lib/gemini";
 import { computeCurrentStreak } from "@/lib/analytics-utils";
 import {
   INTELLIGENCE_VERSION,
   TIMING_UNKNOWN_PERSONALITY,
+  computeIntelligence,
   computePhase,
   hasRealSessionStartTime,
   MIN_TIMED_SESSIONS,
@@ -68,8 +70,6 @@ export function isCacheStale(
 // ─── DB read ──────────────────────────────────────────────────────────────────
 
 export const getCachedInsight = cache(async (): Promise<AIDailyInsight | null> => {
-  if (!isAIEnabled()) return null;
-
   const user = await getCurrentUser();
   if (!user) return null;
 
@@ -112,7 +112,7 @@ export const getCachedInsight = cache(async (): Promise<AIDailyInsight | null> =
 
 // ─── Generation ───────────────────────────────────────────────────────────────
 
-interface InsightContext {
+export interface InsightContext {
   trackerStats: TrackerStats;
   taskStats:    TaskStats;
   profileStats: ProfileStats;
@@ -120,23 +120,31 @@ interface InsightContext {
 }
 
 export async function generateAndStoreInsight(ctx: InsightContext): Promise<AIDailyInsight | null> {
-  if (!isAIEnabled()) return null;
-
   const user = await getCurrentUser();
   if (!user) return null;
 
-  const content = await withTimeout(callGemini(ctx), GEMINI_TIMEOUT_MS, "callGemini");
+  const sb = await createClient();
+  return generateAndStoreInsightForUser(ctx, user.id, sb as SupabaseClient);
+}
+
+export async function generateAndStoreInsightForUser(
+  ctx: InsightContext,
+  userId: string,
+  sb: SupabaseClient,
+): Promise<AIDailyInsight | null> {
+  const content = isAIEnabled()
+    ? await callGemini(ctx)
+    : buildFallbackInsightContent(ctx, "Gemini is not configured");
   if (!content) {
-    console.error(`[ai-insights] generateAndStoreInsight: callGemini returned null (timeout=${GEMINI_TIMEOUT_MS}ms or internal error)`);
+    console.error("[ai-insights] generateAndStoreInsightForUser: no insight content could be generated");
     return null;
   }
 
-  const sb = await createClient();
   const { data, error } = await sb
     .from("ai_insights")
     .upsert(
       {
-        user_id:      user.id,
+        user_id:      userId,
         insight_date: todayDateStr(),
         content,
         generated_at: new Date().toISOString(),
@@ -297,90 +305,226 @@ subjects:${topSubjects} tasks:${taskLine}${globalTimingInstruction}${intelligenc
 
 Use specific numbers. Warm coach tone. No exclamation marks.`;
 
-  let model;
-  try {
-    model = getGeminiFlash();
-  } catch (err) {
-    console.error("[ai-insights] getGeminiFlash() threw — API key likely missing:", err);
-    return null;
-  }
-
-  let result;
-  try {
-    result = await model.generateContent(prompt);
-  } catch (err) {
-    console.error("[ai-insights] model.generateContent() threw — network/quota error:", err);
-    return null;
-  }
-
-  let text: string;
-  try {
-    const candidate = result.response.candidates?.[0];
-    if (!candidate) {
-      console.error("[ai-insights] No candidates in Gemini response:", JSON.stringify(result.response));
-      return null;
-    }
-
-    const finishReason = candidate.finishReason;
-    // Only bail on explicitly unsafe stops. Gemini 2.5 Flash routinely returns
-    // "OTHER" for normal completions — treating it as an error caused silent
-    // null-returns on every generation, writing no cache and surfacing the
-    // "unavailable" error to the user on every page load.
-    const HARMFUL_FINISH_REASONS = new Set(["SAFETY", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII"]);
-    if (finishReason && HARMFUL_FINISH_REASONS.has(finishReason)) {
-      console.error("[ai-insights] Gemini blocked output due to safety policy:", finishReason);
-      return null;
-    }
-    if (finishReason && finishReason !== "STOP" && finishReason !== "MAX_TOKENS") {
-      // Log non-standard reasons but continue — OTHER / RECITATION still produce usable text.
-      console.warn("[ai-insights] Non-standard finishReason (continuing):", finishReason);
-    }
-
-    // Filter thinking parts (gemini-2.5-flash internal reasoning tokens)
-    text = (candidate.content?.parts ?? [])
-      .filter((p) => !(p as unknown as { thought?: boolean }).thought)
-      .map((p)  => ("text" in p ? (p as { text: string }).text : ""))
-      .join("");
-
-    if (!text) {
-      console.error("[ai-insights] Gemini returned empty text after filtering thought parts");
-      return null;
-    }
-  } catch (err) {
-    console.error("[ai-insights] Error reading Gemini response:", err);
-    return null;
-  }
-
-  // Layer 3 (mandatory server-side override): parseResponse receives hasTimingData
-  // (hoisted above). sanitiseIntelligence forces TIMING_UNKNOWN_PERSONALITY when
-  // false, regardless of what Gemini returned.
-  const parsed = parseResponse(text, hasTimingData);
-  if (!parsed) {
-    // Log the full raw text so the exact Gemini output is visible in Vercel
-    // function logs for schema-mismatch debugging.
-    console.error("[ai-insights] parseResponse() returned null — validation failed.\nRaw Gemini text:\n", text);
-    return null;
-  }
-
-  // Post-process: strip timing language from every field when we have no real
-  // session_start_time data.  Wrapped in try/catch — a failure here should
-  // fall back to the unprocessed (but still valid) parsed content rather than
-  // silently turning the entire generation into a null.
-  let content: AIInsightContent;
-  if (hasTimingData) {
-    content = parsed;
-  } else {
-    try {
-      content = sanitiseTimingLanguage(parsed);
-    } catch (err) {
-      console.error("[ai-insights] sanitiseTimingLanguage threw — falling back to unsanitised content:", err);
-      content = parsed;
-    }
-  }
+  const content =
+    await generateWithGeminiFailover(prompt, hasTimingData)
+    ?? buildFallbackInsightContent(ctx, "Gemini provider unavailable");
 
   // Attach staleness metadata so isCacheStale() can work on the next visit
   content.metadata = { sessionCount, intelligence_version: INTELLIGENCE_VERSION };
   return content;
+}
+
+async function generateWithGeminiFailover(
+  prompt: string,
+  hasTimingData: boolean,
+): Promise<AIInsightContent | null> {
+  const modelNames = getGeminiModelNames();
+
+  for (const modelName of modelNames) {
+    const maxAttempts = modelName === modelNames[0] ? 2 : 1;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      let result: unknown = null;
+      try {
+        const model = getGeminiModel(modelName);
+        result = await withTimeout(
+          model.generateContent(prompt),
+          GEMINI_TIMEOUT_MS,
+          `Gemini ${modelName} attempt ${attempt}`,
+        );
+      } catch (err) {
+        console.warn(`[ai-insights] Could not start Gemini model ${modelName}:`, err);
+      }
+
+      if (!result) {
+        await delay(600 * attempt);
+        continue;
+      }
+
+      const text = readGeminiText(result, modelName);
+      if (!text) {
+        await delay(600 * attempt);
+        continue;
+      }
+
+      const parsed = parseResponse(text, hasTimingData);
+      if (!parsed) {
+        console.warn(`[ai-insights] Gemini response from ${modelName} did not match the insight schema.`);
+        await delay(600 * attempt);
+        continue;
+      }
+
+      console.info(`[ai-insights] Generated insight with ${modelName}`);
+      return prepareGeneratedContent(parsed, hasTimingData);
+    }
+  }
+
+  return null;
+}
+
+function readGeminiText(result: unknown, modelName: string): string | null {
+  try {
+    const response = (result as {
+      response?: {
+        candidates?: Array<{
+          finishReason?: string;
+          content?: { parts?: unknown[] };
+        }>;
+      };
+    }).response;
+    const candidate = response?.candidates?.[0];
+    if (!candidate) {
+      console.warn(`[ai-insights] No candidates in Gemini response from ${modelName}`);
+      return null;
+    }
+
+    const finishReason = candidate.finishReason;
+    const harmfulFinishReasons = new Set(["SAFETY", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII"]);
+    if (finishReason && harmfulFinishReasons.has(finishReason)) {
+      console.warn(`[ai-insights] Gemini ${modelName} blocked output due to safety policy:`, finishReason);
+      return null;
+    }
+    if (finishReason && finishReason !== "STOP" && finishReason !== "MAX_TOKENS") {
+      console.warn(`[ai-insights] Gemini ${modelName} returned non-standard finishReason:`, finishReason);
+    }
+
+    const text = (candidate.content?.parts ?? [])
+      .filter((part) => !(part as { thought?: boolean }).thought)
+      .map((part) => ("text" in (part as { text?: string }) ? (part as { text?: string }).text ?? "" : ""))
+      .join("");
+
+    return text.trim() || null;
+  } catch (err) {
+    console.warn(`[ai-insights] Error reading Gemini response from ${modelName}:`, err);
+    return null;
+  }
+}
+
+function prepareGeneratedContent(parsed: AIInsightContent, hasTimingData: boolean): AIInsightContent {
+  if (hasTimingData) {
+    return parsed;
+  }
+
+  try {
+    return sanitiseTimingLanguage(parsed);
+  } catch (err) {
+    console.error("[ai-insights] sanitiseTimingLanguage threw; using unsanitised generated content:", err);
+    return parsed;
+  }
+}
+
+function buildFallbackInsightContent(ctx: InsightContext, reason: string): AIInsightContent {
+  console.warn(`[ai-insights] Using deterministic fallback insight: ${reason}`);
+
+  const { trackerStats, taskStats, profileStats, rawSessions = [] } = ctx;
+  const weekHours = formatHours(trackerStats.weekMinutes);
+  const totalHours = formatHours(profileStats.totalMinutes);
+  const topSubject = getTopSubject(trackerStats);
+  const completionText = taskStats.total > 0
+    ? `${taskStats.completed}/${taskStats.total} tasks complete`
+    : "No tasks logged yet";
+
+  const content: AIInsightContent = {
+    dashboard: {
+      headline: trackerStats.weekMinutes > 0 ? "Study Momentum Updated" : "Ready to Begin",
+      insights: [
+        trackerStats.weekMinutes > 0
+          ? `You studied ${weekHours} this week${topSubject ? `, led by ${topSubject}` : ""}.`
+          : "Log your first study session to unlock richer coaching.",
+        `Your current streak is ${trackerStats.streak} ${trackerStats.streak === 1 ? "day" : "days"}.`,
+        `${completionText}.`,
+      ],
+    },
+    analytics: {
+      summary: `You have logged ${profileStats.totalSessions} sessions and ${totalHours} of total study time.`,
+      observations: [
+        `This week: ${weekHours} across your logged sessions.`,
+        topSubject ? `Most recent focus area: ${topSubject}.` : "Subjects will appear once sessions are logged.",
+        `Task completion rate: ${profileStats.taskCompletionRate}%.`,
+        `Current streak: ${profileStats.streak} ${profileStats.streak === 1 ? "day" : "days"}.`,
+      ],
+    },
+    metadata: {
+      sessionCount: rawSessions.length || profileStats.totalSessions,
+      intelligence_version: INTELLIGENCE_VERSION,
+    },
+  };
+
+  if (rawSessions.length > 0) {
+    const intel = computeIntelligence(rawSessions);
+    const confidence = intel.phase === 1 ? "low" : intel.phase === 2 ? "moderate" : "high";
+    const burnoutLevel: AIIntelligenceInsight["burnoutAnalysis"]["level"] =
+      intel.phase === 1 ? "unknown" : intel.burnout.level;
+
+    content.intelligence = {
+      phase: intel.phase,
+      dataConfidence: confidence,
+      consistencyNarrative: {
+        label: intel.consistency.label,
+        tagline: `Your consistency score is ${intel.consistency.score}/100 from logged study sessions.`,
+      },
+      burnoutAnalysis: {
+        level: burnoutLevel,
+        headline: burnoutLevel === "unknown" ? "Still Learning" : `${capitalize(burnoutLevel)} Risk`,
+        insight: intel.burnout.advice,
+        signals: intel.burnout.signals.map((signal) => signal.label).slice(0, 5),
+      },
+      personality: intel.bestHours.hasEnoughTimingData
+        ? {
+            type: intel.personality.type,
+            emoji: "1",
+            tagline: "Based on logged timing",
+            insight: intel.personality.description,
+          }
+        : { ...TIMING_UNKNOWN_PERSONALITY },
+      weeklyNarrative: formatWeeklyNarrative(intel.weeklyReport),
+      recommendations: intel.recommendations.slice(0, 3).map((recommendation, index) => ({
+        emoji: String(index + 1),
+        title: recommendation.replace(/^[^\w]+/, "").split(".")[0].slice(0, 40) || "Keep Building",
+        detail: recommendation,
+      })),
+      motivationalMessage: trackerStats.weekMinutes > 0
+        ? "Your logged work is moving the pattern forward. Keep the next session simple and consistent."
+        : "Start with one focused session today and StudyFlow will build from there.",
+    };
+  }
+
+  return content;
+}
+
+function getTopSubject(trackerStats: TrackerStats): string | null {
+  const subjectMap = new Map<string, number>();
+  for (const session of trackerStats.recentSessions) {
+    if (!session.subject) continue;
+    subjectMap.set(session.subject, (subjectMap.get(session.subject) ?? 0) + session.duration_minutes);
+  }
+
+  return [...subjectMap.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+}
+
+function formatHours(minutes: number): string {
+  const hours = minutes / 60;
+  return `${hours.toFixed(hours >= 10 ? 0 : 1).replace(/\.0$/, "")}h`;
+}
+
+function formatWeeklyNarrative(report: { thisWeekMinutes: number; lastWeekMinutes: number; trend: string; changePercent: number }): string {
+  if (report.trend === "new") {
+    return `This is the first comparison week with ${formatHours(report.thisWeekMinutes)} logged.`;
+  }
+  if (report.trend === "flat") {
+    return `This week is steady at ${formatHours(report.thisWeekMinutes)}, close to last week's pace.`;
+  }
+
+  const direction = report.trend === "up" ? "up" : "down";
+  return `This week is ${direction} ${Math.abs(report.changePercent)}% versus last week.`;
+}
+
+function capitalize(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export async function __debugGenerateInsightContent(ctx: InsightContext): Promise<AIInsightContent | null> {
