@@ -1,13 +1,13 @@
 {
   "name": "study-dashboard",
-  "version": "0.1.0",
+  "version": "0.1.9",
   "private": true,
   "description": "StudyFlow desktop app",
   "author": "StudyFlow",
   "main": "electron/main.cjs",
   "repository": {
     "type": "git",
-    "url": "https://github.com/YOUR_GITHUB_USERNAME/YOUR_REPO.git"
+    "url": "https://github.com/shreyasnayak45/AI-Study-Dashboard---Windows.git"
   },
   "scripts": {
     "dev": "next dev",
@@ -15,12 +15,13 @@
     "start": "next start",
     "lint": "eslint",
     "desktop:dev": "node electron/dev.cjs",
-    "desktop:build": "npm run build && node electron/prepare-next.cjs && electron-builder --win",
-    "desktop:publish": "npm run build && node electron/prepare-next.cjs && electron-builder --win --publish always"
+    "desktop:build": "node electron/desktop-build.cjs",
+    "desktop:publish": "node electron/desktop-build.cjs --publish always"
   },
   "build": {
     "appId": "com.studyflow.desktop",
     "productName": "StudyFlow",
+    "executableName": "StudyFlow",
     "artifactName": "${productName}-Setup-${version}.${ext}",
     "directories": {
       "output": "release"
@@ -28,6 +29,7 @@
     "files": [
       "electron/main.cjs",
       "electron/preload.cjs",
+      "build/logo.ico",
       ".next/standalone/**",
       "package.json"
     ],
@@ -37,16 +39,36 @@
     "asarUnpack": [
       ".next/standalone/**"
     ],
+    "extraResources": [
+      {
+        "from": "build/logo.ico",
+        "to": "logo.ico"
+      }
+    ],
     "win": {
+      "icon": "build/logo.ico",
       "target": "nsis"
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "perMachine": false,
+      "allowElevation": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerHeader": "build/installerHeader.bmp",
+      "installerSidebar": "build/installerSidebar.bmp",
+      "uninstallerSidebar": "build/installerSidebar.bmp",
+      "installerIcon": "build/logo.ico",
+      "uninstallerIcon": "build/logo.ico",
+      "include": "build/installer.nsh",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "StudyFlow"
     },
     "publish": [
       {
         "provider": "github",
+        "owner": "shreyasnayak45",
+        "repo": "AI-Study-Dashboard---Windows",
         "releaseType": "release"
       }
     ]
