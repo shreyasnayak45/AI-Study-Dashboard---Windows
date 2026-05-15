@@ -34,7 +34,7 @@ export function Sidebar({ user, profile }: SidebarProps) {
   return (
     <>
       {/* ── Mobile top bar — hamburger + logo + avatar ─────────────── */}
-      <header className="fixed inset-x-0 top-0 z-30 flex h-14 items-center justify-between border-b border-white/[0.06] bg-surface-800/90 px-4 backdrop-blur-xl lg:hidden">
+      <header className="app-drag-region fixed inset-x-0 top-0 z-30 flex h-14 items-center justify-between border-b border-white/[0.06] bg-surface-800/90 px-4 backdrop-blur-xl lg:hidden">
         <button
           type="button"
           onClick={() => setMobileOpen(true)}

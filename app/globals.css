@@ -48,6 +48,23 @@ body {
    interactive elements — makes buttons and links feel instant.      */
 button, a, [role="button"] { touch-action: manipulation; }
 
+/* Electron frameless window drag support. */
+.app-drag-region {
+  -webkit-app-region: drag;
+}
+
+.app-no-drag,
+.app-no-drag *,
+button,
+a,
+input,
+textarea,
+select,
+[role="button"],
+[contenteditable="true"] {
+  -webkit-app-region: no-drag;
+}
+
 /* Prevent iOS rubber-band overscroll from propagating out of the
    main scroll container, which avoids layout repaints at the
    top/bottom bounce boundary.                                       */

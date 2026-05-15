@@ -16,6 +16,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <div className="flex h-screen overflow-hidden bg-surface-900">
+      <div className="app-drag-region fixed left-0 right-[138px] top-0 z-[60] hidden h-8 lg:block" aria-hidden="true" />
       <Sidebar user={user} profile={profile} />
       <main className="flex-1 overflow-y-auto pt-14 lg:pt-0">
         <div className="min-h-full bg-[radial-gradient(ellipse_80%_50%_at_50%_-10%,rgba(59,130,246,0.06),transparent)]">
