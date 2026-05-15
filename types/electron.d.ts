@@ -10,6 +10,7 @@ declare global {
         callback: (payload: { code?: string; error?: string }) => void
       ) => () => void;
       checkForUpdates: () => Promise<{ ok: boolean; message: string }>;
+      restartAndInstallUpdate: () => Promise<{ ok: boolean; message: string }>;
       onUpdateStatus: (callback: (message: string) => void) => () => void;
     };
   }

@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld("studyflowDesktop", {
     return () => ipcRenderer.removeListener("auth:callback", listener);
   },
   checkForUpdates: () => ipcRenderer.invoke("updates:check"),
+  restartAndInstallUpdate: () => ipcRenderer.invoke("updates:restart-and-install"),
   onUpdateStatus: (callback) => {
     if (typeof callback !== "function") return () => {};
 

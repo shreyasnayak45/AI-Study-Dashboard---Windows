@@ -19,6 +19,11 @@
 
 # production
 /build
+!/build/
+!/build/logo.ico
+!/build/installer.nsh
+!/build/installerHeader.bmp
+!/build/installerSidebar.bmp
 /release
 
 # misc
@@ -40,3 +45,5 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+.vercel

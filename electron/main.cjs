@@ -1,20 +1,197 @@
 const { app, BrowserWindow, ipcMain, Menu, shell } = require("electron");
 const { autoUpdater } = require("electron-updater");
+const fs = require("node:fs");
 const http = require("node:http");
 const path = require("node:path");
 
 let mainWindow;
 let oauthCallbackServer;
+let updateReadyToInstall = false;
+let isQuittingForUpdate = false;
 
+const APP_ID = "com.studyflow.desktop";
 const DESKTOP_OAUTH_CALLBACK_URL = "http://localhost:3333/auth/callback";
 
 autoUpdater.autoDownload = true;
 autoUpdater.autoInstallOnAppQuit = true;
 
+function getUpdateErrorMessage(error) {
+  const detail = error instanceof Error ? error.message : "";
+
+  if (/404|not found|No published versions|latest.yml/i.test(detail)) {
+    return "No published StudyFlow update is available on GitHub Releases yet.";
+  }
+
+  if (/net::|ENOTFOUND|ECONN|ETIMEDOUT|timeout|network/i.test(detail)) {
+    return "I couldn't reach GitHub Releases. Check your internet connection and try again.";
+  }
+
+  return "I couldn't check for updates right now. Please try again in a minute.";
+}
+
+function compareVersions(left, right) {
+  const leftParts = String(left).split(".").map((part) => Number.parseInt(part, 10) || 0);
+  const rightParts = String(right).split(".").map((part) => Number.parseInt(part, 10) || 0);
+  const length = Math.max(leftParts.length, rightParts.length);
+
+  for (let index = 0; index < length; index += 1) {
+    const diff = (leftParts[index] || 0) - (rightParts[index] || 0);
+    if (diff !== 0) return diff > 0 ? 1 : -1;
+  }
+
+  return 0;
+}
+
+function getUpdaterCacheDirName() {
+  if (!app.isPackaged) {
+    return "study-dashboard-updater";
+  }
+
+  try {
+    const updateConfigPath = path.join(process.resourcesPath, "app-update.yml");
+    const updateConfig = fs.readFileSync(updateConfigPath, "utf8");
+    const match = updateConfig.match(/^updaterCacheDirName:\s*["']?([^"'\r\n]+)["']?/m);
+    return match?.[1]?.trim() || "study-dashboard-updater";
+  } catch (error) {
+    console.warn("[updates] couldn't read updater cache name:", error);
+    return "study-dashboard-updater";
+  }
+}
+
+function getPendingUpdateCacheDir() {
+  if (process.platform !== "win32" || !process.env.LOCALAPPDATA) {
+    return undefined;
+  }
+
+  return path.join(process.env.LOCALAPPDATA, getUpdaterCacheDirName(), "pending");
+}
+
+function removePendingUpdateCache(reason) {
+  const pendingDir = getPendingUpdateCacheDir();
+  if (!pendingDir || !fs.existsSync(pendingDir)) return;
+
+  try {
+    fs.rmSync(pendingDir, { recursive: true, force: true });
+    console.info(`[updates] cleared pending update cache ${reason}: ${pendingDir}`);
+  } catch (error) {
+    console.warn("[updates] couldn't clear pending update cache:", error);
+  }
+}
+
+function getPendingUpdateVersion() {
+  const pendingDir = getPendingUpdateCacheDir();
+  if (!pendingDir) return undefined;
+
+  try {
+    const infoPath = path.join(pendingDir, "update-info.json");
+    const info = JSON.parse(fs.readFileSync(infoPath, "utf8"));
+    const fileName = typeof info.fileName === "string" ? info.fileName : "";
+    return fileName.match(/Setup-(\d+\.\d+\.\d+)\.exe/i)?.[1];
+  } catch {
+    return undefined;
+  }
+}
+
+function cleanPendingUpdateCacheAfterRelaunch() {
+  if (!app.isPackaged) return;
+
+  if (process.argv.includes("--updated")) {
+    removePendingUpdateCache("after successful update relaunch");
+    return;
+  }
+
+  const pendingVersion = getPendingUpdateVersion();
+  if (pendingVersion && compareVersions(pendingVersion, app.getVersion()) <= 0) {
+    removePendingUpdateCache(`after launching version ${app.getVersion()}`);
+  }
+}
+
+function schedulePendingUpdateCacheCleanup() {
+  cleanPendingUpdateCacheAfterRelaunch();
+  setTimeout(cleanPendingUpdateCacheAfterRelaunch, 5000);
+  setTimeout(cleanPendingUpdateCacheAfterRelaunch, 15000);
+}
+
+function cleanOlderPendingUpdateCache() {
+  if (!app.isPackaged) return;
+
+  const pendingVersion = getPendingUpdateVersion();
+  if (pendingVersion && compareVersions(pendingVersion, app.getVersion()) < 0) {
+    removePendingUpdateCache(`for older pending version ${pendingVersion}`);
+  }
+}
+
 function sendUpdateStatus(message) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("updates:status", message);
   }
+}
+
+function closeWindowsForUpdate(timeoutMs = 1500) {
+  const windows = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed());
+
+  if (windows.length === 0) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    let remaining = windows.length;
+    const finishOne = () => {
+      remaining -= 1;
+      if (remaining <= 0) {
+        clearTimeout(fallback);
+        resolve();
+      }
+    };
+
+    const fallback = setTimeout(() => {
+      for (const window of windows) {
+        if (!window.isDestroyed()) {
+          window.destroy();
+        }
+      }
+      resolve();
+    }, timeoutMs);
+
+    for (const window of windows) {
+      window.removeAllListeners("close");
+      window.once("closed", finishOne);
+      window.hide();
+      window.close();
+    }
+
+    Promise.resolve().then(() => {
+      if (windows.every((window) => window.isDestroyed())) {
+        clearTimeout(fallback);
+        resolve();
+      }
+    });
+  });
+}
+
+async function restartAndInstallUpdate() {
+  isQuittingForUpdate = true;
+
+  const message = "Restarting StudyFlow to install the update...";
+  sendUpdateStatus(message);
+  stopOAuthCallbackServer();
+
+  await closeWindowsForUpdate();
+
+  // First arg `isSilent`: false → DO NOT pass /S to NSIS, so the assisted
+  // installer wizard is visible (Welcome → InstFiles → Finish). With /S
+  // (the previous setting) the installer ran headlessly and the updater
+  // process sat in Task Manager with no UI, making the update look hung.
+  // Second arg `isForceRunAfter`: keep true so --force-run is set, but for
+  // visible installs the app actually relaunches via the "Launch StudyFlow"
+  // checkbox on the Finish page (checked by default in MUI2).
+  autoUpdater.quitAndInstall(false, true);
+
+  setTimeout(() => {
+    app.exit(0);
+  }, 750);
+
+  return { ok: true, message };
 }
 
 function getStandaloneDir() {
@@ -23,6 +200,14 @@ function getStandaloneDir() {
   }
 
   return path.join(app.getAppPath(), ".next", "standalone");
+}
+
+function getAppIconPath() {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, "logo.ico");
+  }
+
+  return path.join(app.getAppPath(), "build", "logo.ico");
 }
 
 function getFreePort() {
@@ -186,6 +371,7 @@ async function getAppUrl() {
   const appUrl = `http://127.0.0.1:${port}`;
   const standaloneDir = getStandaloneDir();
 
+  process.env.STUDYFLOW_DESKTOP = "1";
   process.env.NODE_ENV = "production";
   process.env.PORT = String(port);
   process.env.HOSTNAME = "127.0.0.1";
@@ -207,6 +393,7 @@ async function createWindow() {
     minHeight: 640,
     backgroundColor: "#09090f",
     title: "StudyFlow",
+    icon: getAppIconPath(),
     titleBarStyle: "hidden",
     titleBarOverlay: {
       color: "#09090f",
@@ -227,7 +414,9 @@ async function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  app.setAppUserModelId(APP_ID);
   Menu.setApplicationMenu(null);
+  schedulePendingUpdateCacheCleanup();
 
   ipcMain.handle("app:get-version", () => app.getVersion());
   ipcMain.handle("auth:get-callback-url", () => startOAuthCallbackServer());
@@ -235,40 +424,76 @@ app.whenReady().then(async () => {
     return { ok: openExternalUrl(url) };
   });
   ipcMain.handle("updates:check", async () => {
+    updateReadyToInstall = false;
+
     if (!app.isPackaged) {
-      const message = "Update checks are available in packaged Windows builds.";
+      const message = "Update checks work in the installed Windows app.";
       sendUpdateStatus(message);
       return { ok: true, message };
     }
 
     try {
+      cleanOlderPendingUpdateCache();
       const result = await autoUpdater.checkForUpdates();
+      const latestVersion = result?.updateInfo?.version;
+      const currentVersion = app.getVersion();
+      const message = latestVersion && latestVersion !== currentVersion
+        ? `StudyFlow ${latestVersion} is available. Downloading it now...`
+        : "StudyFlow is up to date.";
+
       return {
         ok: true,
-        message: result?.updateInfo?.version
-          ? `Latest release found: ${result.updateInfo.version}`
-          : "Update check complete.",
+        message,
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Update check failed.";
+      const message = getUpdateErrorMessage(error);
+      console.warn("[updates] check failed:", error);
       sendUpdateStatus(message);
       return { ok: false, message };
     }
   });
+  ipcMain.handle("updates:restart-and-install", async () => {
+    if (!app.isPackaged) {
+      return {
+        ok: false,
+        message: "Restart and update is available in the installed Windows app.",
+      };
+    }
 
-  autoUpdater.on("checking-for-update", () => sendUpdateStatus("Checking for updates..."));
-  autoUpdater.on("update-available", (info) => {
-    sendUpdateStatus(`Update available: ${info.version}. Downloading...`);
+    if (!updateReadyToInstall) {
+      return {
+        ok: false,
+        message: "The update is not ready to install yet.",
+      };
+    }
+
+    return restartAndInstallUpdate();
   });
-  autoUpdater.on("update-not-available", () => sendUpdateStatus("You are running the latest version."));
+
+  autoUpdater.on("checking-for-update", () => {
+    updateReadyToInstall = false;
+    sendUpdateStatus("Checking for updates...");
+  });
+  autoUpdater.on("update-available", (info) => {
+    updateReadyToInstall = false;
+    sendUpdateStatus(`StudyFlow ${info.version} is available. Downloading it now...`);
+  });
+  autoUpdater.on("update-not-available", () => {
+    updateReadyToInstall = false;
+    sendUpdateStatus("StudyFlow is up to date.");
+  });
   autoUpdater.on("download-progress", (progress) => {
-    sendUpdateStatus(`Downloading update: ${Math.round(progress.percent)}%`);
+    updateReadyToInstall = false;
+    sendUpdateStatus(`Downloading update... ${Math.round(progress.percent)}%`);
   });
   autoUpdater.on("update-downloaded", () => {
-    sendUpdateStatus("Update downloaded. It will install after you restart StudyFlow.");
+    updateReadyToInstall = true;
+    sendUpdateStatus("Update ready. Restart StudyFlow to finish installing it.");
   });
   autoUpdater.on("error", (error) => {
-    sendUpdateStatus(error instanceof Error ? error.message : "Update check failed.");
+    updateReadyToInstall = false;
+    console.warn("[updates] updater error:", error);
+    sendUpdateStatus(getUpdateErrorMessage(error));
   });
 
   await createWindow();
@@ -283,7 +508,24 @@ app.whenReady().then(async () => {
 app.on("window-all-closed", () => {
   stopOAuthCallbackServer();
 
+  if (isQuittingForUpdate) {
+    return;
+  }
+
   if (process.platform !== "darwin") {
     app.quit();
+  }
+});
+
+app.on("before-quit", () => {
+  if (!isQuittingForUpdate) {
+    return;
+  }
+
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.removeAllListeners("close");
+    if (!window.isDestroyed()) {
+      window.destroy();
+    }
   }
 });

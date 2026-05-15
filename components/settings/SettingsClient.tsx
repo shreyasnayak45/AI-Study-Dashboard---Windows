@@ -37,6 +37,10 @@ type Status = { ok: boolean; text: string };
 const SESSION_LENGTHS = [15, 25, 30, 45, 60, 90];
 const GOAL_PRESETS    = [60, 90, 120, 180, 240];
 
+function isUpdateErrorMessage(message: string) {
+  return /error|fail|couldn'?t|not ready/i.test(message);
+}
+
 // ─── Toggle switch ────────────────────────────────────────────────────────────
 
 function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
@@ -98,6 +102,8 @@ export function SettingsClient({ user, profile, settings }: Props) {
   const [appVersion, setAppVersion] = useState<string | null>(null);
   const [updateStatus, setUpdateStatus] = useState<Status | null>(null);
   const [updatePending, setUpdatePending] = useState(false);
+  const [updateReady, setUpdateReady] = useState(false);
+  const [restartPending, setRestartPending] = useState(false);
 
   useEffect(() => {
     const desktop = window.studyflowDesktop;
@@ -109,11 +115,14 @@ export function SettingsClient({ user, profile, settings }: Props) {
       .catch(() => setAppVersion("Unavailable"));
 
     return desktop.onUpdateStatus((message) => {
+      const isChecking = message === "Checking for updates...";
+
       setUpdateStatus({
-        ok: !/error|fail/i.test(message),
+        ok: !isUpdateErrorMessage(message),
         text: message,
       });
-      setUpdatePending(false);
+      setUpdateReady(message.startsWith("Update ready."));
+      setUpdatePending(isChecking);
     });
   }, []);
 
@@ -122,11 +131,38 @@ export function SettingsClient({ user, profile, settings }: Props) {
     if (!desktop) return;
 
     setUpdatePending(true);
+    setUpdateReady(false);
+    setRestartPending(false);
     setUpdateStatus({ ok: true, text: "Checking for updates..." });
 
-    const result = await desktop.checkForUpdates();
-    setUpdateStatus({ ok: result.ok, text: result.message });
-    setUpdatePending(false);
+    try {
+      const result = await desktop.checkForUpdates();
+      setUpdateStatus({ ok: result.ok, text: result.message });
+      setUpdateReady(result.message.startsWith("Update ready."));
+    } catch {
+      setUpdateStatus({ ok: false, text: "I couldn't check for updates right now." });
+    } finally {
+      setUpdatePending(false);
+    }
+  }
+
+  async function handleRestartAndUpdate() {
+    const desktop = window.studyflowDesktop;
+    if (!desktop) return;
+
+    setRestartPending(true);
+    setUpdateStatus({ ok: true, text: "Restarting StudyFlow to install the update..." });
+
+    try {
+      const result = await desktop.restartAndInstallUpdate();
+      setUpdateStatus({ ok: result.ok, text: result.message });
+      if (!result.ok) {
+        setRestartPending(false);
+      }
+    } catch {
+      setUpdateStatus({ ok: false, text: "I couldn't start the update installer." });
+      setRestartPending(false);
+    }
   }
   // ── Account ──────────────────────────────────────────────────────
   const [avatarUrl,   setAvatarUrl]    = useState<string | null>(profile?.avatar_url ?? null);
@@ -369,17 +405,32 @@ export function SettingsClient({ user, profile, settings }: Props) {
                   <p className="text-sm font-medium text-white/80">StudyFlow for Windows</p>
                   <p className="text-xs text-white/35">Version {appVersion ?? "Loading..."}</p>
                 </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  loading={updatePending}
-                  onClick={handleCheckUpdates}
-                  className="w-full shrink-0 sm:w-auto"
-                >
-                  {!updatePending && <RefreshCw className="h-3.5 w-3.5" />}
-                  Check for updates
-                </Button>
+                <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+                  {updateReady && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      loading={restartPending}
+                      onClick={handleRestartAndUpdate}
+                      className="w-full shrink-0 sm:w-auto"
+                    >
+                      {!restartPending && <RefreshCw className="h-3.5 w-3.5" />}
+                      Restart &amp; Update
+                    </Button>
+                  )}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={updatePending || restartPending}
+                    onClick={handleCheckUpdates}
+                    className="w-full shrink-0 sm:w-auto"
+                    aria-busy={updatePending}
+                  >
+                    <RefreshCw className={cn("h-3.5 w-3.5", updatePending && "animate-spin")} />
+                    Check for updates
+                  </Button>
+                </div>
               </div>
 
               <StatusMsg status={updateStatus} />
