@@ -23,6 +23,124 @@ const WINDOW_CONTROL_OVERLAY = {
   symbolColor: "#f8fafc",
   height: 32,
 };
+const STARTUP_LOADING_HTML = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>StudyFlow</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        background: #0a0a0f;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        overflow: hidden;
+        background:
+          radial-gradient(circle at 38% 28%, rgba(99, 102, 241, 0.18), transparent 34%),
+          radial-gradient(circle at 68% 64%, rgba(14, 165, 233, 0.11), transparent 30%),
+          #0a0a0f;
+        color: rgba(248, 250, 252, 0.9);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      .drag-strip {
+        -webkit-app-region: drag;
+        position: fixed;
+        inset: 0 138px auto 0;
+        height: 32px;
+      }
+
+      main {
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 40px;
+      }
+
+      .mark {
+        display: grid;
+        place-items: center;
+        width: 72px;
+        height: 72px;
+        margin: 0 auto 18px;
+        border-radius: 18px;
+        border: 1px solid rgba(99, 102, 241, 0.22);
+        background: rgba(255, 255, 255, 0.035);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 18px 50px rgba(0, 0, 0, 0.28);
+      }
+
+      .s {
+        font-size: 34px;
+        font-weight: 800;
+        letter-spacing: 0;
+        line-height: 1;
+        background: linear-gradient(135deg, #22d3ee, #6366f1 48%, #f0abfc);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+
+      h1 {
+        margin: 0;
+        text-align: center;
+        font-size: 18px;
+        font-weight: 700;
+        letter-spacing: 0;
+      }
+
+      p {
+        margin: 8px 0 0;
+        text-align: center;
+        color: rgba(248, 250, 252, 0.42);
+        font-size: 13px;
+      }
+
+      .bar {
+        position: relative;
+        width: min(240px, 55vw);
+        height: 3px;
+        margin: 22px auto 0;
+        overflow: hidden;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.08);
+      }
+
+      .bar::after {
+        content: "";
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 42%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, #22d3ee, #6366f1, #f0abfc);
+        animation: load 1.15s ease-in-out infinite;
+      }
+
+      @keyframes load {
+        0% { transform: translateX(-110%); }
+        100% { transform: translateX(260%); }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="drag-strip"></div>
+    <main>
+      <section aria-label="StudyFlow is starting">
+        <div class="mark" aria-hidden="true"><span class="s">S</span></div>
+        <h1>StudyFlow</h1>
+        <p>Opening your dashboard...</p>
+        <div class="bar" aria-hidden="true"></div>
+      </section>
+    </main>
+  </body>
+</html>`;
 
 if (process.platform === "win32") {
   app.setAppUserModelId(APP_ID);
@@ -290,6 +408,10 @@ function getAppIcon() {
   return getAppIconPath();
 }
 
+function getStartupLoadingUrl() {
+  return `data:text/html;charset=utf-8,${encodeURIComponent(STARTUP_LOADING_HTML)}`;
+}
+
 function getFreePort() {
   return new Promise((resolve, reject) => {
     const server = http.createServer();
@@ -464,7 +586,6 @@ async function getAppUrl() {
 }
 
 async function createWindow() {
-  const appUrl = await getAppUrl();
   const appIcon = getAppIcon();
 
   mainWindow = new BrowserWindow({
@@ -474,6 +595,7 @@ async function createWindow() {
     minHeight: 640,
     backgroundColor: WINDOW_BACKGROUND_COLOR,
     title: "StudyFlow",
+    show: false,
     icon: appIcon,
     titleBarStyle: "hidden",
     titleBarOverlay: WINDOW_CONTROL_OVERLAY,
@@ -493,15 +615,24 @@ async function createWindow() {
     mainWindow.setIcon(appIcon);
   }
 
-  keepExternalUrlsOutOfApp(mainWindow, appUrl);
+  mainWindow.once("ready-to-show", () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show();
+    }
+  });
 
+  await mainWindow.loadURL(getStartupLoadingUrl());
+
+  const appUrl = await getAppUrl();
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+
+  keepExternalUrlsOutOfApp(mainWindow, appUrl);
   await mainWindow.loadURL(appUrl);
 }
 
 app.whenReady().then(async () => {
   app.setAppUserModelId(APP_ID);
   Menu.setApplicationMenu(null);
-  schedulePendingUpdateCacheCleanup();
 
   ipcMain.handle("app:get-version", () => app.getVersion());
   ipcMain.handle("auth:get-callback-url", () => startOAuthCallbackServer());
@@ -588,6 +719,7 @@ app.whenReady().then(async () => {
   });
 
   await createWindow();
+  setTimeout(schedulePendingUpdateCacheCleanup, 1000);
   scheduleStartupUpdateCheck();
 
   app.on("activate", () => {
