@@ -2,14 +2,14 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { useState } from "react";
-import { usePathname } from "next/navigation";
-import { ArrowUpCircle, ChevronUp, Menu, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { AlertCircle, ArrowUpCircle, ChevronUp, Loader2, Menu, RefreshCw, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NAV_ITEMS } from "@/constants/nav";
 import { UserAvatar } from "@/components/ui/UserAvatar";
 import { ProfileDropdown } from "@/components/profile/ProfileDropdown";
-import { useDesktopUpdateBadge } from "@/hooks/useDesktopUpdateBadge";
+import { useDesktopUpdateStatus } from "@/hooks/useDesktopUpdateBadge";
 import type { User, UserProfile } from "@/types";
 
 interface SidebarProps {
@@ -19,9 +19,10 @@ interface SidebarProps {
 
 export function Sidebar({ user, profile }: SidebarProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [mobileOpen,   setMobileOpen]   = useState(false);
-  const updateBadge = useDesktopUpdateBadge();
+  const desktopUpdate = useDesktopUpdateStatus();
 
   const displayName =
     profile?.display_name ??
@@ -31,6 +32,36 @@ export function Sidebar({ user, profile }: SidebarProps) {
 
   function closeMobile() {
     setMobileOpen(false);
+  }
+
+  useEffect(() => {
+    let idleId: number | null = null;
+    const timer = window.setTimeout(() => {
+      if ("requestIdleCallback" in window) {
+        idleId = window.requestIdleCallback(() => router.prefetch("/settings"), { timeout: 1800 });
+        return;
+      }
+
+      router.prefetch("/settings");
+    }, 1400);
+
+    return () => {
+      window.clearTimeout(timer);
+      if (idleId !== null && "cancelIdleCallback" in window) {
+        window.cancelIdleCallback(idleId);
+      }
+    };
+  }, [router]);
+
+  async function handleSidebarUpdateClick() {
+    if (desktopUpdate.status === "ready") {
+      await desktopUpdate.restartAndInstallUpdate();
+      return;
+    }
+
+    if (desktopUpdate.status === "available" || desktopUpdate.status === "error") {
+      await desktopUpdate.downloadUpdate();
+    }
   }
 
   return (
@@ -135,22 +166,67 @@ export function Sidebar({ user, profile }: SidebarProps) {
           })}
         </nav>
 
-        {updateBadge.visible && (
+        {desktopUpdate.visible && (
           <div className="px-3 pb-3">
-            <Link
-              href="/settings"
-              onClick={closeMobile}
-              title={updateBadge.message || updateBadge.label}
+            <div
+              title={desktopUpdate.message || desktopUpdate.label}
               className={cn(
-                "app-no-drag group flex items-center gap-2 rounded-xl px-3 py-2",
-                "border border-amber-400/15 bg-amber-500/[0.08] text-xs font-medium text-amber-100/80",
-                "shadow-[inset_0_1px_0_rgba(251,191,36,0.08)] transition-colors",
-                "hover:border-amber-300/20 hover:bg-amber-500/[0.12] hover:text-amber-100"
+                "app-no-drag rounded-xl border border-amber-400/15 bg-amber-500/[0.08] px-3 py-2",
+                "text-xs font-medium text-amber-100/80 shadow-[inset_0_1px_0_rgba(251,191,36,0.08)]"
               )}
             >
-              <ArrowUpCircle className="h-3.5 w-3.5 shrink-0 text-amber-300/70 group-hover:text-amber-200" />
-              <span className="truncate">{updateBadge.label}</span>
-            </Link>
+              <button
+                type="button"
+                onClick={handleSidebarUpdateClick}
+                disabled={desktopUpdate.status === "downloading" || desktopUpdate.status === "installing"}
+                aria-busy={desktopUpdate.isBusy}
+                className={cn(
+                  "group flex w-full items-center gap-2 text-left transition-colors",
+                  "disabled:cursor-default disabled:opacity-90",
+                  desktopUpdate.canDownload && "hover:text-amber-100"
+                )}
+              >
+                {desktopUpdate.status === "downloading" || desktopUpdate.status === "installing" ? (
+                  <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-amber-300/70" />
+                ) : desktopUpdate.hasError ? (
+                  <AlertCircle className="h-3.5 w-3.5 shrink-0 text-amber-300/70" />
+                ) : (
+                  <ArrowUpCircle className="h-3.5 w-3.5 shrink-0 text-amber-300/70 group-hover:text-amber-200" />
+                )}
+                <span className="min-w-0 flex-1 truncate">
+                  {desktopUpdate.hasError ? "Update failed" : desktopUpdate.label}
+                </span>
+                {desktopUpdate.hasError && (
+                  <span className="shrink-0 rounded-md border border-amber-300/15 px-1.5 py-0.5 text-[10px] text-amber-100/65">
+                    Retry
+                  </span>
+                )}
+              </button>
+
+              {desktopUpdate.status === "downloading" && desktopUpdate.progress !== null && (
+                <div className="mt-2 h-1 overflow-hidden rounded-full bg-amber-950/60">
+                  <div
+                    className="h-full rounded-full bg-amber-300/70 transition-[width]"
+                    style={{ width: `${desktopUpdate.progress}%` }}
+                  />
+                </div>
+              )}
+
+              {desktopUpdate.canRestart && (
+                <button
+                  type="button"
+                  onClick={desktopUpdate.restartAndInstallUpdate}
+                  className={cn(
+                    "mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg px-2 py-1.5",
+                    "border border-amber-300/20 bg-amber-300/10 text-[11px] font-semibold text-amber-100",
+                    "transition-colors hover:bg-amber-300/15"
+                  )}
+                >
+                  <RefreshCw className="h-3 w-3" />
+                  Restart &amp; Update
+                </button>
+              )}
+            </div>
           </div>
         )}
 

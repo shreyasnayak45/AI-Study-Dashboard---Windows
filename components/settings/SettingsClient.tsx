@@ -22,6 +22,7 @@ import {
   clearAllSessions, exportStudyData,
 } from "@/app/actions/settings";
 import { AuthConnectionsSection } from "@/components/settings/AuthConnectionsSection";
+import { useDesktopUpdateStatus } from "@/hooks/useDesktopUpdateBadge";
 import { fmtHours } from "@/lib/analytics-utils";
 import { cn } from "@/lib/utils";
 import type { User as UserType, UserProfile, UserSettings } from "@/types";
@@ -36,10 +37,6 @@ type Status = { ok: boolean; text: string };
 
 const SESSION_LENGTHS = [15, 25, 30, 45, 60, 90];
 const GOAL_PRESETS    = [60, 90, 120, 180, 240];
-
-function isUpdateErrorMessage(message: string) {
-  return /error|fail|couldn'?t|not ready/i.test(message);
-}
 
 // ─── Toggle switch ────────────────────────────────────────────────────────────
 
@@ -100,10 +97,7 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 
 export function SettingsClient({ user, profile, settings }: Props) {
   const [appVersion, setAppVersion] = useState<string | null>(null);
-  const [updateStatus, setUpdateStatus] = useState<Status | null>(null);
-  const [updatePending, setUpdatePending] = useState(false);
-  const [updateReady, setUpdateReady] = useState(false);
-  const [restartPending, setRestartPending] = useState(false);
+  const desktopUpdate = useDesktopUpdateStatus();
 
   useEffect(() => {
     const desktop = window.studyflowDesktop;
@@ -113,56 +107,19 @@ export function SettingsClient({ user, profile, settings }: Props) {
       .getAppVersion()
       .then(setAppVersion)
       .catch(() => setAppVersion("Unavailable"));
-
-    return desktop.onUpdateStatus((message) => {
-      const isChecking = message === "Checking for updates...";
-
-      setUpdateStatus({
-        ok: !isUpdateErrorMessage(message),
-        text: message,
-      });
-      setUpdateReady(message.startsWith("Update ready."));
-      setUpdatePending(isChecking);
-    });
   }, []);
 
   async function handleCheckUpdates() {
-    const desktop = window.studyflowDesktop;
-    if (!desktop) return;
-
-    setUpdatePending(true);
-    setUpdateReady(false);
-    setRestartPending(false);
-    setUpdateStatus({ ok: true, text: "Checking for updates..." });
-
-    try {
-      const result = await desktop.checkForUpdates();
-      setUpdateStatus({ ok: result.ok, text: result.message });
-      setUpdateReady(result.message.startsWith("Update ready."));
-    } catch {
-      setUpdateStatus({ ok: false, text: "I couldn't check for updates right now." });
-    } finally {
-      setUpdatePending(false);
+    if (desktopUpdate.status === "available" || desktopUpdate.status === "error") {
+      await desktopUpdate.downloadUpdate();
+      return;
     }
+
+    await desktopUpdate.checkForUpdates();
   }
 
   async function handleRestartAndUpdate() {
-    const desktop = window.studyflowDesktop;
-    if (!desktop) return;
-
-    setRestartPending(true);
-    setUpdateStatus({ ok: true, text: "Restarting StudyFlow to install the update..." });
-
-    try {
-      const result = await desktop.restartAndInstallUpdate();
-      setUpdateStatus({ ok: result.ok, text: result.message });
-      if (!result.ok) {
-        setRestartPending(false);
-      }
-    } catch {
-      setUpdateStatus({ ok: false, text: "I couldn't start the update installer." });
-      setRestartPending(false);
-    }
+    await desktopUpdate.restartAndInstallUpdate();
   }
   // ── Account ──────────────────────────────────────────────────────
   const [avatarUrl,   setAvatarUrl]    = useState<string | null>(profile?.avatar_url ?? null);
@@ -242,6 +199,21 @@ export function SettingsClient({ user, profile, settings }: Props) {
   }
 
   const email = user.email ?? "";
+  const updateStatus: Status | null = desktopUpdate.message
+    ? {
+        ok: !desktopUpdate.hasError,
+        text: desktopUpdate.message,
+      }
+    : null;
+  const updatePending = desktopUpdate.status === "checking" || desktopUpdate.status === "downloading";
+  const restartPending = desktopUpdate.status === "installing";
+  const updateReady = desktopUpdate.canRestart;
+  const updateActionLabel =
+    desktopUpdate.status === "error"
+      ? "Retry download"
+      : desktopUpdate.status === "available"
+      ? "Download update"
+      : "Check for updates";
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -428,7 +400,7 @@ export function SettingsClient({ user, profile, settings }: Props) {
                     aria-busy={updatePending}
                   >
                     <RefreshCw className={cn("h-3.5 w-3.5", updatePending && "animate-spin")} />
-                    Check for updates
+                    {updateActionLabel}
                   </Button>
                 </div>
               </div>
