@@ -11,6 +11,12 @@ let isQuittingForUpdate = false;
 
 const APP_ID = "com.studyflow.desktop";
 const DESKTOP_OAUTH_CALLBACK_URL = "http://localhost:3333/auth/callback";
+const WINDOW_BACKGROUND_COLOR = "#0a0a0f";
+const WINDOW_CONTROL_OVERLAY = {
+  color: "#00000000",
+  symbolColor: "#f8fafc",
+  height: 32,
+};
 
 autoUpdater.autoDownload = true;
 autoUpdater.autoInstallOnAppQuit = true;
@@ -391,15 +397,11 @@ async function createWindow() {
     height: 820,
     minWidth: 960,
     minHeight: 640,
-    backgroundColor: "#0a0a0f",
+    backgroundColor: WINDOW_BACKGROUND_COLOR,
     title: "StudyFlow",
     icon: getAppIconPath(),
     titleBarStyle: "hidden",
-    titleBarOverlay: {
-      color: "#0a0a0f",
-      symbolColor: "#f8fafc",
-      height: 32,
-    },
+    titleBarOverlay: WINDOW_CONTROL_OVERLAY,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -407,6 +409,10 @@ async function createWindow() {
       sandbox: true,
     },
   });
+
+  if (process.platform !== "darwin" && typeof mainWindow.setTitleBarOverlay === "function") {
+    mainWindow.setTitleBarOverlay(WINDOW_CONTROL_OVERLAY);
+  }
 
   keepExternalUrlsOutOfApp(mainWindow, appUrl);
 
