@@ -1,6 +1,6 @@
 {
   "name": "study-dashboard",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "private": true,
   "description": "StudyFlow desktop app",
   "author": "StudyFlow",
@@ -36,6 +36,7 @@
     "extraMetadata": {
       "main": "electron/main.cjs"
     },
+    "afterPack": "electron/after-pack.cjs",
     "asarUnpack": [
       ".next/standalone/**"
     ],
@@ -43,10 +44,15 @@
       {
         "from": "build/logo.ico",
         "to": "logo.ico"
+      },
+      {
+        "from": "public/logo.png",
+        "to": "logo.png"
       }
     ],
     "win": {
       "icon": "build/logo.ico",
+      "signAndEditExecutable": false,
       "target": "nsis"
     },
     "nsis": {

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, Menu, nativeImage, shell } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const fs = require("node:fs");
 const http = require("node:http");
@@ -17,6 +17,10 @@ const WINDOW_CONTROL_OVERLAY = {
   symbolColor: "#f8fafc",
   height: 32,
 };
+
+if (process.platform === "win32") {
+  app.setAppUserModelId(APP_ID);
+}
 
 autoUpdater.autoDownload = true;
 autoUpdater.autoInstallOnAppQuit = true;
@@ -216,6 +220,29 @@ function getAppIconPath() {
   return path.join(app.getAppPath(), "build", "logo.ico");
 }
 
+function getRuntimeAppIconPath() {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, "logo.png");
+  }
+
+  return path.join(app.getAppPath(), "public", "logo.png");
+}
+
+function getAppIcon() {
+  const iconPaths = [getRuntimeAppIconPath(), getAppIconPath()];
+
+  for (const iconPath of iconPaths) {
+    const icon = nativeImage.createFromPath(iconPath);
+
+    if (!icon.isEmpty()) {
+      return icon;
+    }
+  }
+
+  console.warn(`[window] StudyFlow icon could not be loaded from ${iconPaths.join(", ")}`);
+  return getAppIconPath();
+}
+
 function getFreePort() {
   return new Promise((resolve, reject) => {
     const server = http.createServer();
@@ -391,6 +418,7 @@ async function getAppUrl() {
 
 async function createWindow() {
   const appUrl = await getAppUrl();
+  const appIcon = getAppIcon();
 
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -399,7 +427,7 @@ async function createWindow() {
     minHeight: 640,
     backgroundColor: WINDOW_BACKGROUND_COLOR,
     title: "StudyFlow",
-    icon: getAppIconPath(),
+    icon: appIcon,
     titleBarStyle: "hidden",
     titleBarOverlay: WINDOW_CONTROL_OVERLAY,
     webPreferences: {
@@ -412,6 +440,10 @@ async function createWindow() {
 
   if (process.platform !== "darwin" && typeof mainWindow.setTitleBarOverlay === "function") {
     mainWindow.setTitleBarOverlay(WINDOW_CONTROL_OVERLAY);
+  }
+
+  if (process.platform === "win32" && typeof mainWindow.setIcon === "function") {
+    mainWindow.setIcon(appIcon);
   }
 
   keepExternalUrlsOutOfApp(mainWindow, appUrl);

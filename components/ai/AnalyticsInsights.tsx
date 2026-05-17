@@ -120,7 +120,7 @@ export function AnalyticsInsights({ initialInsight }: AnalyticsInsightsProps) {
           </motion.div>
         )}
 
-        {/* Error state */}
+        {/* Error state (no cached insight) */}
         {!isPending && !insight && error && (
           <motion.p
             key="error"
@@ -133,6 +133,17 @@ export function AnalyticsInsights({ initialInsight }: AnalyticsInsightsProps) {
         )}
 
       </AnimatePresence>
+
+      {/* Error after a failed refresh while a cached insight is still shown */}
+      {!isPending && insight && error && (
+        <motion.p
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="mt-3 text-xs text-white/25"
+        >
+          {error}
+        </motion.p>
+      )}
     </section>
   );
 }

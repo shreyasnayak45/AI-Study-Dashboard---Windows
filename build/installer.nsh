@@ -49,8 +49,34 @@
 
 ; Drop any locally-bundled .env.local on install/uninstall — it must
 ; never be shipped, and a stale copy must not survive an upgrade.
+!macro studyflowRepairShortcut _LINK
+  nsExec::ExecToLog `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -C "$$target = [IO.Path]::GetFullPath((Join-Path '$INSTDIR' '${APP_EXECUTABLE_FILENAME}')); $$workDir = [IO.Path]::GetDirectoryName($$target); $$icon = [IO.Path]::GetFullPath((Join-Path '$INSTDIR' 'resources\logo.ico')) + ',0'; $$link = '${_LINK}'; $$parent = Split-Path -Parent $$link; New-Item -ItemType Directory -Force -Path $$parent | Out-Null; $$shell = New-Object -ComObject WScript.Shell; $$shortcut = $$shell.CreateShortcut($$link); $$shortcut.TargetPath = $$target; $$shortcut.WorkingDirectory = $$workDir; $$shortcut.IconLocation = $$icon; $$shortcut.Description = '${APP_DESCRIPTION}'; $$shortcut.Save()"`
+  Pop $0
+!macroend
+
 !macro customInstall
+  SetOutPath "$INSTDIR"
+  StrCpy $appExe "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
+
   Delete "$INSTDIR\resources\.env.local"
+
+  ; Repair shortcuts on upgrade. The 0.1.16 build could leave Windows with a
+  ; stale/default Electron shortcut icon even after the executable icon is fixed.
+  Delete "$newStartMenuLink"
+  CreateShortCut "$newStartMenuLink" "$INSTDIR\${APP_EXECUTABLE_FILENAME}" "" "$INSTDIR\resources\logo.ico" 0 "" "" "${APP_DESCRIPTION}"
+  ClearErrors
+  !insertmacro studyflowRepairShortcut "$newStartMenuLink"
+  WinShell::SetLnkAUMI "$newStartMenuLink" "${APP_ID}"
+
+  ${ifNot} ${isNoDesktopShortcut}
+    Delete "$newDesktopLink"
+    CreateShortCut "$newDesktopLink" "$INSTDIR\${APP_EXECUTABLE_FILENAME}" "" "$INSTDIR\resources\logo.ico" 0 "" "" "${APP_DESCRIPTION}"
+    ClearErrors
+    !insertmacro studyflowRepairShortcut "$newDesktopLink"
+    WinShell::SetLnkAUMI "$newDesktopLink" "${APP_ID}"
+  ${endIf}
+
+  System::Call 'Shell32::SHChangeNotify(i 0x8000000, i 0, i 0, i 0)'
 !macroend
 
 !macro customUnInstall

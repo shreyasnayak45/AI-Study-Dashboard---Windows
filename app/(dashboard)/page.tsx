@@ -3,7 +3,6 @@ import { createClient } from "@/lib/supabase/server";
 import { getTrackerStats, formatDuration, formatStudyDate } from "@/lib/tracker-stats";
 import { getTaskStats } from "@/lib/task-stats";
 import { getCachedInsight } from "@/lib/ai-insights";
-import { isAIEnabled } from "@/lib/gemini";
 import { Card } from "@/components/ui/Card";
 import { SubjectBadge } from "@/components/tracker/SubjectBadge";
 import { PriorityBadge } from "@/components/tasks/PriorityBadge";
@@ -18,13 +17,11 @@ import {
 } from "lucide-react";
 
 export default async function DashboardPage() {
-  const aiEnabled = isAIEnabled();
-
   const [{ data: { user } }, trackerStats, taskStats, initialInsight] = await Promise.all([
     createClient().then((sb) => sb.auth.getUser()),
     getTrackerStats(),
     getTaskStats(),
-    aiEnabled ? getCachedInsight() : Promise.resolve(null),
+    getCachedInsight(),
   ]);
   const miniData = trackerStats.miniData;
 
@@ -102,11 +99,9 @@ export default async function DashboardPage() {
       </div>
 
       {/* ── AI Insights ───────────────────────────────────────────── */}
-      {aiEnabled && (
-        <div className="mt-6">
-          <InsightsCard initialInsight={initialInsight} />
-        </div>
-      )}
+      <div className="mt-6">
+        <InsightsCard initialInsight={initialInsight} />
+      </div>
 
       {/* ── Two-column lower section ──────────────────────────────── */}
       <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
