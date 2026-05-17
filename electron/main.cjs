@@ -8,6 +8,12 @@ let mainWindow;
 let oauthCallbackServer;
 let updateReadyToInstall = false;
 let isQuittingForUpdate = false;
+let didRunStartupUpdateCheck = false;
+let latestUpdateState = {
+  status: "idle",
+  message: "",
+  updatedAt: null,
+};
 
 const APP_ID = "com.studyflow.desktop";
 const DESKTOP_OAUTH_CALLBACK_URL = "http://localhost:3333/auth/callback";
@@ -137,6 +143,47 @@ function sendUpdateStatus(message) {
   }
 }
 
+function setUpdateState(status, message) {
+  latestUpdateState = {
+    status,
+    message,
+    updatedAt: new Date().toISOString(),
+  };
+
+  sendUpdateStatus(message);
+}
+
+function getUpdateState() {
+  return {
+    ...latestUpdateState,
+    available: latestUpdateState.status === "available" || latestUpdateState.status === "ready",
+  };
+}
+
+function canCheckForDesktopUpdates() {
+  return process.platform === "win32" && app.isPackaged;
+}
+
+function scheduleStartupUpdateCheck() {
+  if (!canCheckForDesktopUpdates() || didRunStartupUpdateCheck) return;
+
+  didRunStartupUpdateCheck = true;
+
+  setTimeout(() => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+
+    cleanOlderPendingUpdateCache();
+    autoUpdater.checkForUpdates().catch((error) => {
+      latestUpdateState = {
+        status: "error",
+        message: getUpdateErrorMessage(error),
+        updatedAt: new Date().toISOString(),
+      };
+      console.warn("[updates] startup check failed:", error);
+    });
+  }, 5000);
+}
+
 function closeWindowsForUpdate(timeoutMs = 1500) {
   const windows = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed());
 
@@ -183,7 +230,7 @@ async function restartAndInstallUpdate() {
   isQuittingForUpdate = true;
 
   const message = "Restarting StudyFlow to install the update...";
-  sendUpdateStatus(message);
+  setUpdateState("installing", message);
   stopOAuthCallbackServer();
 
   await closeWindowsForUpdate();
@@ -464,9 +511,9 @@ app.whenReady().then(async () => {
   ipcMain.handle("updates:check", async () => {
     updateReadyToInstall = false;
 
-    if (!app.isPackaged) {
+    if (!canCheckForDesktopUpdates()) {
       const message = "Update checks work in the installed Windows app.";
-      sendUpdateStatus(message);
+      setUpdateState("idle", message);
       return { ok: true, message };
     }
 
@@ -479,6 +526,11 @@ app.whenReady().then(async () => {
         ? `StudyFlow ${latestVersion} is available. Downloading it now...`
         : "StudyFlow is up to date.";
 
+      setUpdateState(
+        latestVersion && latestVersion !== currentVersion ? "available" : "idle",
+        message
+      );
+
       return {
         ok: true,
         message,
@@ -486,12 +538,13 @@ app.whenReady().then(async () => {
     } catch (error) {
       const message = getUpdateErrorMessage(error);
       console.warn("[updates] check failed:", error);
-      sendUpdateStatus(message);
+      setUpdateState("error", message);
       return { ok: false, message };
     }
   });
+  ipcMain.handle("updates:get-state", () => getUpdateState());
   ipcMain.handle("updates:restart-and-install", async () => {
-    if (!app.isPackaged) {
+    if (!canCheckForDesktopUpdates()) {
       return {
         ok: false,
         message: "Restart and update is available in the installed Windows app.",
@@ -510,31 +563,32 @@ app.whenReady().then(async () => {
 
   autoUpdater.on("checking-for-update", () => {
     updateReadyToInstall = false;
-    sendUpdateStatus("Checking for updates...");
+    setUpdateState("checking", "Checking for updates...");
   });
   autoUpdater.on("update-available", (info) => {
     updateReadyToInstall = false;
-    sendUpdateStatus(`StudyFlow ${info.version} is available. Downloading it now...`);
+    setUpdateState("available", `StudyFlow ${info.version} is available. Downloading it now...`);
   });
   autoUpdater.on("update-not-available", () => {
     updateReadyToInstall = false;
-    sendUpdateStatus("StudyFlow is up to date.");
+    setUpdateState("idle", "StudyFlow is up to date.");
   });
   autoUpdater.on("download-progress", (progress) => {
     updateReadyToInstall = false;
-    sendUpdateStatus(`Downloading update... ${Math.round(progress.percent)}%`);
+    setUpdateState("available", `Downloading update... ${Math.round(progress.percent)}%`);
   });
   autoUpdater.on("update-downloaded", () => {
     updateReadyToInstall = true;
-    sendUpdateStatus("Update ready. Restart StudyFlow to finish installing it.");
+    setUpdateState("ready", "Update ready. Restart StudyFlow to finish installing it.");
   });
   autoUpdater.on("error", (error) => {
     updateReadyToInstall = false;
     console.warn("[updates] updater error:", error);
-    sendUpdateStatus(getUpdateErrorMessage(error));
+    setUpdateState("error", getUpdateErrorMessage(error));
   });
 
   await createWindow();
+  scheduleStartupUpdateCheck();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {

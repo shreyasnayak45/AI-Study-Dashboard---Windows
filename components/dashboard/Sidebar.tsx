@@ -4,11 +4,12 @@ import Link from "next/link";
 import Image from "next/image";
 import { useState } from "react";
 import { usePathname } from "next/navigation";
-import { ChevronUp, Menu, X } from "lucide-react";
+import { ArrowUpCircle, ChevronUp, Menu, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NAV_ITEMS } from "@/constants/nav";
 import { UserAvatar } from "@/components/ui/UserAvatar";
 import { ProfileDropdown } from "@/components/profile/ProfileDropdown";
+import { useDesktopUpdateBadge } from "@/hooks/useDesktopUpdateBadge";
 import type { User, UserProfile } from "@/types";
 
 interface SidebarProps {
@@ -20,6 +21,7 @@ export function Sidebar({ user, profile }: SidebarProps) {
   const pathname = usePathname();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [mobileOpen,   setMobileOpen]   = useState(false);
+  const updateBadge = useDesktopUpdateBadge();
 
   const displayName =
     profile?.display_name ??
@@ -132,6 +134,25 @@ export function Sidebar({ user, profile }: SidebarProps) {
             );
           })}
         </nav>
+
+        {updateBadge.visible && (
+          <div className="px-3 pb-3">
+            <Link
+              href="/settings"
+              onClick={closeMobile}
+              title={updateBadge.message || updateBadge.label}
+              className={cn(
+                "app-no-drag group flex items-center gap-2 rounded-xl px-3 py-2",
+                "border border-amber-400/15 bg-amber-500/[0.08] text-xs font-medium text-amber-100/80",
+                "shadow-[inset_0_1px_0_rgba(251,191,36,0.08)] transition-colors",
+                "hover:border-amber-300/20 hover:bg-amber-500/[0.12] hover:text-amber-100"
+              )}
+            >
+              <ArrowUpCircle className="h-3.5 w-3.5 shrink-0 text-amber-300/70 group-hover:text-amber-200" />
+              <span className="truncate">{updateBadge.label}</span>
+            </Link>
+          </div>
+        )}
 
         {/* User section — click to open profile dropdown */}
         <div className="relative border-t border-white/[0.05] p-3">
