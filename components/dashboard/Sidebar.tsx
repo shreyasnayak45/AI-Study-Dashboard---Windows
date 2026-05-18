@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { AlertCircle, ArrowUpCircle, ChevronUp, Loader2, Menu, RefreshCw, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -17,9 +17,14 @@ interface SidebarProps {
   profile: UserProfile | null;
 }
 
+const SIDEBAR_PREFETCH_ROUTES = NAV_ITEMS.map((item) => item.href);
+const SIDEBAR_PREFETCH_START_DELAY_MS = 450;
+const SIDEBAR_PREFETCH_STAGGER_MS = 350;
+
 export function Sidebar({ user, profile }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
+  const prefetchedRoutesRef = useRef(new Set<string>());
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [mobileOpen,   setMobileOpen]   = useState(false);
   const desktopUpdate = useDesktopUpdateStatus();
@@ -34,24 +39,23 @@ export function Sidebar({ user, profile }: SidebarProps) {
     setMobileOpen(false);
   }
 
-  useEffect(() => {
-    let idleId: number | null = null;
-    const timer = window.setTimeout(() => {
-      if ("requestIdleCallback" in window) {
-        idleId = window.requestIdleCallback(() => router.prefetch("/settings"), { timeout: 1800 });
-        return;
-      }
+  const prefetchRoute = useCallback((href: string) => {
+    if (prefetchedRoutesRef.current.has(href)) return;
 
-      router.prefetch("/settings");
-    }, 1400);
-
-    return () => {
-      window.clearTimeout(timer);
-      if (idleId !== null && "cancelIdleCallback" in window) {
-        window.cancelIdleCallback(idleId);
-      }
-    };
+    prefetchedRoutesRef.current.add(href);
+    router.prefetch(href);
   }, [router]);
+
+  useEffect(() => {
+    const timers = SIDEBAR_PREFETCH_ROUTES.map((href, index) => (
+      window.setTimeout(
+        () => prefetchRoute(href),
+        SIDEBAR_PREFETCH_START_DELAY_MS + index * SIDEBAR_PREFETCH_STAGGER_MS
+      )
+    ));
+
+    return () => timers.forEach((timer) => window.clearTimeout(timer));
+  }, [prefetchRoute]);
 
   async function handleSidebarUpdateClick() {
     if (desktopUpdate.status === "ready") {
@@ -143,6 +147,9 @@ export function Sidebar({ user, profile }: SidebarProps) {
               <Link
                 key={item.href}
                 href={item.href}
+                prefetch
+                onMouseEnter={() => prefetchRoute(item.href)}
+                onFocus={() => prefetchRoute(item.href)}
                 onClick={closeMobile}
                 className={cn(
                   "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-all duration-150",

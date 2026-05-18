@@ -25,6 +25,7 @@ const WINDOW_CONTROL_OVERLAY = {
   symbolColor: "#f8fafc",
   height: 32,
 };
+const STARTUP_BACKGROUND_TASK_DELAY_MS = 30000;
 const STARTUP_LOADING_HTML = `<!doctype html>
 <html>
   <head>
@@ -77,6 +78,13 @@ const STARTUP_LOADING_HTML = `<!doctype html>
         border: 1px solid rgba(99, 102, 241, 0.22);
         background: rgba(255, 255, 255, 0.035);
         box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 18px 50px rgba(0, 0, 0, 0.28);
+      }
+
+      .mark img {
+        width: 72px;
+        height: 72px;
+        object-fit: cover;
+        transform: scale(1.12);
       }
 
       .s {
@@ -135,7 +143,7 @@ const STARTUP_LOADING_HTML = `<!doctype html>
     <div class="drag-strip"></div>
     <main>
       <section aria-label="StudyFlow is starting">
-        <div class="mark" aria-hidden="true"><span class="s">S</span></div>
+        <div class="mark" aria-hidden="true">__STUDYFLOW_LOGO__</div>
         <h1>StudyFlow</h1>
         <p>Opening your dashboard...</p>
         <div class="bar" aria-hidden="true"></div>
@@ -340,7 +348,7 @@ function scheduleStartupUpdateCheck() {
       };
       console.warn("[updates] startup check failed:", error);
     });
-  }, 5000);
+  }, STARTUP_BACKGROUND_TASK_DELAY_MS);
 }
 
 function closeWindowsForUpdate(timeoutMs = 1500) {
@@ -449,8 +457,20 @@ function getAppIcon() {
   return getAppIconPath();
 }
 
+function getStartupLogoMarkup() {
+  try {
+    const iconPath = getAppIconPath();
+    const icon = fs.readFileSync(iconPath);
+    return `<img src="data:image/x-icon;base64,${icon.toString("base64")}" alt="" />`;
+  } catch (error) {
+    console.warn("[window] StudyFlow startup logo could not be loaded:", error);
+    return '<span class="s">S</span>';
+  }
+}
+
 function getStartupLoadingUrl() {
-  return `data:text/html;charset=utf-8,${encodeURIComponent(STARTUP_LOADING_HTML)}`;
+  const html = STARTUP_LOADING_HTML.replace("__STUDYFLOW_LOGO__", getStartupLogoMarkup());
+  return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 }
 
 function getFreePort() {
@@ -809,7 +829,7 @@ app.whenReady().then(async () => {
   });
 
   await createWindow();
-  setTimeout(schedulePendingUpdateCacheCleanup, 1000);
+  setTimeout(schedulePendingUpdateCacheCleanup, STARTUP_BACKGROUND_TASK_DELAY_MS);
   scheduleStartupUpdateCheck();
 
   app.on("activate", () => {
