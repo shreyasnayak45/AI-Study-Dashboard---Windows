@@ -42,6 +42,29 @@
   !insertmacro MUI_PAGE_WELCOME
 !macroend
 
+; Electron Builder's default assisted-installer Finish action shells the
+; Start Menu shortcut through StdUtils.ExecShellAsUser. For this per-user
+; installer, use a tiny cmd/start trampoline so the wizard returns immediately
+; without waiting on shell/shortcut handoff or StudyFlow.exe process creation.
+!macro customFinishPage
+  !ifndef HIDE_RUN_AFTER_FINISH
+    Function studyflowFinishLaunch
+      SetOutPath "$INSTDIR"
+
+      ${if} ${isUpdated}
+        Exec '"$SYSDIR\cmd.exe" /D /C start "" /D "$INSTDIR" "$INSTDIR\${APP_EXECUTABLE_FILENAME}" --updated'
+      ${else}
+        Exec '"$SYSDIR\cmd.exe" /D /C start "" /D "$INSTDIR" "$INSTDIR\${APP_EXECUTABLE_FILENAME}"'
+      ${endif}
+    FunctionEnd
+
+    !define MUI_FINISHPAGE_RUN
+    !define MUI_FINISHPAGE_RUN_FUNCTION "studyflowFinishLaunch"
+  !endif
+
+  !insertmacro MUI_PAGE_FINISH
+!macroend
+
 ; Force per-user install (skip the all-users/current-user mode page).
 !macro customInstallMode
   StrCpy $isForceCurrentInstall "1"
